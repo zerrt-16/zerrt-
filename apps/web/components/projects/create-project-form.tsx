@@ -6,7 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { getClientApiBaseUrl } from "@/lib/api";
+import { getClientApiBaseUrl, readApiErrorMessage } from "@/lib/api";
 import type { Project } from "@/lib/types";
 
 export function CreateProjectForm() {
@@ -19,7 +19,10 @@ export function CreateProjectForm() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!title.trim()) {
+    const projectTitle = title.trim();
+    const projectDescription = description.trim();
+
+    if (!projectTitle) {
       setError("请输入项目名称。");
       return;
     }
@@ -34,13 +37,13 @@ export function CreateProjectForm() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          title,
-          description,
+          title: projectTitle,
+          description: projectDescription,
         }),
       });
 
       if (!response.ok) {
-        throw new Error("创建项目失败，请稍后再试。");
+        throw new Error(await readApiErrorMessage(response));
       }
 
       const project = (await response.json()) as Project;

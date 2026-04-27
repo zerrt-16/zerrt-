@@ -1,13 +1,19 @@
-const FALLBACK_API_ORIGIN = "http://localhost:4000";
+const CLIENT_FALLBACK_API_BASE_URL = "/api";
+const SERVER_FALLBACK_API_BASE_URL =
+  process.env.NODE_ENV === "production" ? "/api" : "http://localhost:4000/api";
 
-function normalizeApiBaseUrl(value?: string | null) {
-  const trimmedValue = value?.trim();
+function normalizeApiBaseUrl(value?: string | null, fallback = CLIENT_FALLBACK_API_BASE_URL) {
+  const trimmedValue = value?.trim().replace(/^\/+(https?:\/\/)/i, "$1");
 
   if (!trimmedValue) {
-    return `${FALLBACK_API_ORIGIN}/api`;
+    return fallback;
   }
 
-  const withoutTrailingSlash = trimmedValue.replace(/\/+$/, "");
+  const withLeadingSlash =
+    /^https?:\/\//i.test(trimmedValue) || trimmedValue.startsWith("/")
+      ? trimmedValue
+      : `/${trimmedValue}`;
+  const withoutTrailingSlash = withLeadingSlash.replace(/\/+$/, "");
 
   if (withoutTrailingSlash.endsWith("/api")) {
     return withoutTrailingSlash;
@@ -22,21 +28,38 @@ export function getServerApiBaseUrl() {
       process.env.API_SERVER_URL ??
       process.env.NEXT_PUBLIC_API_BASE_URL ??
       process.env.NEXT_PUBLIC_API_URL,
+    SERVER_FALLBACK_API_BASE_URL,
   );
 }
 
 export function getClientApiBaseUrl() {
   return normalizeApiBaseUrl(
     process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_URL,
+    CLIENT_FALLBACK_API_BASE_URL,
   );
 }
 
 function getApiOrigin(apiBaseUrl: string) {
+  if (!/^https?:\/\//i.test(apiBaseUrl)) {
+    return typeof window !== "undefined" ? window.location.origin : "";
+  }
+
   try {
     return new URL(apiBaseUrl).origin;
   } catch {
-    return FALLBACK_API_ORIGIN;
+    return "";
   }
+}
+
+export function joinApiUrl(apiBaseUrl: string, path: string) {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
+  const normalizedBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  return `${normalizedBaseUrl.replace(/\/+$/, "")}${normalizedPath}`;
 }
 
 export function resolveAssetUrl(fileUrl: string, apiBaseUrl = getClientApiBaseUrl()) {
@@ -69,7 +92,7 @@ export async function readApiErrorMessage(response: Response) {
 }
 
 export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${getServerApiBaseUrl()}${path}`, {
+  const response = await fetch(joinApiUrl(getServerApiBaseUrl(), path), {
     ...init,
     cache: "no-store",
     headers: {

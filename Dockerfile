@@ -2,6 +2,10 @@ FROM node:22-alpine AS deps
 
 WORKDIR /app
 
+RUN printf '%s\n' \
+  'https://mirrors.aliyun.com/alpine/v3.22/main' \
+  'https://mirrors.aliyun.com/alpine/v3.22/community' \
+  > /etc/apk/repositories
 RUN apk add --no-cache openssl
 
 COPY package.json package-lock.json turbo.json tsconfig.base.json ./
@@ -29,6 +33,10 @@ WORKDIR /app/apps/api
 ENV NODE_ENV=production
 ENV PORT=4000
 
+RUN printf '%s\n' \
+  'https://mirrors.aliyun.com/alpine/v3.22/main' \
+  'https://mirrors.aliyun.com/alpine/v3.22/community' \
+  > /etc/apk/repositories
 RUN apk add --no-cache openssl
 
 COPY --from=api-build /app/package.json /app/package.json
