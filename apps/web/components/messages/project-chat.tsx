@@ -1,0 +1,915 @@
+"use client";
+
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertCircle,
+  Clock3,
+  FileText,
+  History,
+  ImageIcon,
+  ImagePlus,
+  LoaderCircle,
+  MessageSquare,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { getClientApiBaseUrl, readApiErrorMessage, resolveAssetUrl } from "@/lib/api";
+import type {
+  Asset,
+  GenerationTask,
+  ImageModel,
+  Message,
+  Project,
+  UploadedAsset,
+  Version,
+} from "@/lib/types";
+
+type ProjectChatProps = {
+  initialMessages: Message[];
+  initialVersions: Version[];
+  imageModels: ImageModel[];
+  project: Project;
+  projectId: string;
+};
+
+type PreviewAsset = {
+  id: string;
+  fileUrl: string;
+  mimeType: string;
+  width: number;
+  height: number;
+  sizeBytes: number;
+};
+
+const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
+const SUPPORTED_FILE_TYPES = new Set(["image/png", "image/jpg", "image/jpeg", "image/webp"]);
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "时间未知";
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatShortTime(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "时间未知";
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatTaskLabel(status: GenerationTask["status"]) {
+  switch (status) {
+    case "pending":
+      return "等待生成";
+    case "running":
+      return "生成中";
+    case "success":
+      return "生成成功";
+    case "failed":
+      return "生成失败";
+    default:
+      return status;
+  }
+}
+
+function formatTaskTone(status?: GenerationTask["status"]) {
+  switch (status) {
+    case "pending":
+    case "running":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "success":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "failed":
+      return "border-red-200 bg-red-50 text-red-700";
+    default:
+      return "border-border bg-white text-muted-foreground";
+  }
+}
+
+function formatLevelLabel(level: ImageModel["costLevel"] | ImageModel["speedLevel"]) {
+  switch (level) {
+    case "low":
+      return "低";
+    case "medium":
+      return "中";
+    case "high":
+      return "高";
+    default:
+      return level;
+  }
+}
+
+function formatProviderLabel(provider: ImageModel["provider"]) {
+  switch (provider) {
+    case "apimart":
+      return "APIMart";
+    case "mock":
+      return "Mock";
+    default:
+      return provider;
+  }
+}
+
+function getCapabilityLabels(model: ImageModel) {
+  const labels: string[] = [];
+
+  if (model.supportsTextToImage) {
+    labels.push("文生图");
+  }
+
+  if (model.supportsImageToImage) {
+    labels.push("图生图");
+  }
+
+  if (model.supportsMultiImage) {
+    labels.push("多图参考");
+  }
+
+  return labels.length > 0 ? labels : ["暂无能力说明"];
+}
+
+function getRoleLabel(role: Message["role"]) {
+  switch (role) {
+    case "user":
+      return "用户";
+    case "assistant":
+      return "助手";
+    case "system":
+      return "系统";
+    default:
+      return role;
+  }
+}
+
+function toPreviewAsset(asset: UploadedAsset | Asset): PreviewAsset {
+  return {
+    id: "assetId" in asset ? asset.assetId : asset.id,
+    fileUrl: asset.fileUrl,
+    mimeType: asset.mimeType,
+    width: asset.width,
+    height: asset.height,
+    sizeBytes: asset.sizeBytes,
+  };
+}
+
+function findLatestMessageAttachment(messages: Message[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const attachment = messages[index]?.attachmentAsset;
+    if (attachment) {
+      return toPreviewAsset(attachment);
+    }
+  }
+
+  return null;
+}
+
+export function ProjectChat({
+  initialMessages,
+  initialVersions,
+  imageModels,
+  project,
+  projectId,
+}: ProjectChatProps) {
+  const defaultImageModel =
+    imageModels.find((model) => model.id === "apimart-gpt-image-2") ?? imageModels[0] ?? null;
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [messages, setMessages] = useState(initialMessages ?? []);
+  const [versions, setVersions] = useState(initialVersions ?? []);
+  const [content, setContent] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [pendingAsset, setPendingAsset] = useState<UploadedAsset | null>(null);
+  const [currentTask, setCurrentTask] = useState<GenerationTask | null>(null);
+  const [selectedImageModelId, setSelectedImageModelId] = useState(defaultImageModel?.id ?? "");
+  const [selectedSize, setSelectedSize] = useState(defaultImageModel?.defaultSize ?? "1:1");
+
+  const hasMessages = messages.length > 0;
+  const hasVersions = versions.length > 0;
+  const isImageToImage = Boolean(pendingAsset);
+  const compatibleImageModels = useMemo(
+    () =>
+      imageModels.filter((model) =>
+        isImageToImage ? model.supportsImageToImage : model.supportsTextToImage,
+      ),
+    [imageModels, isImageToImage],
+  );
+  const selectedImageModel =
+    imageModels.find((model) => model.id === selectedImageModelId) ?? defaultImageModel;
+  const latestVersion = versions[0] ?? null;
+  const latestReferenceAsset = useMemo(
+    () => (pendingAsset ? toPreviewAsset(pendingAsset) : findLatestMessageAttachment(messages)),
+    [messages, pendingAsset],
+  );
+  const latestOutputAsset =
+    currentTask?.generatedVersion?.outputAsset ?? latestVersion?.outputAsset ?? null;
+  const generationStatus = currentTask ? formatTaskLabel(currentTask.status) : "待生成";
+  const statusTone = formatTaskTone(currentTask?.status);
+
+  useEffect(() => {
+    if (!selectedImageModel) {
+      return;
+    }
+
+    if (!selectedImageModel.allowedSizes.includes(selectedSize)) {
+      setSelectedSize(selectedImageModel.defaultSize);
+    }
+  }, [selectedImageModel, selectedSize]);
+
+  useEffect(() => {
+    if (!compatibleImageModels.length) {
+      return;
+    }
+
+    const selectedModelIsCompatible = compatibleImageModels.some(
+      (model) => model.id === selectedImageModelId,
+    );
+
+    if (!selectedModelIsCompatible) {
+      const preferredModel =
+        compatibleImageModels.find((model) => model.id === "apimart-gpt-image-2") ??
+        compatibleImageModels[0];
+      setSelectedImageModelId(preferredModel.id);
+      setSelectedSize(preferredModel.defaultSize);
+    }
+  }, [compatibleImageModels, selectedImageModelId]);
+
+  async function refreshWorkspaceData() {
+    const [messagesResponse, versionsResponse] = await Promise.all([
+      fetch(`${getClientApiBaseUrl()}/projects/${projectId}/messages`),
+      fetch(`${getClientApiBaseUrl()}/projects/${projectId}/versions`),
+    ]);
+
+    if (!messagesResponse.ok) {
+      throw new Error(await readApiErrorMessage(messagesResponse));
+    }
+
+    if (!versionsResponse.ok) {
+      throw new Error(await readApiErrorMessage(versionsResponse));
+    }
+
+    const nextMessages = (await messagesResponse.json()) as Message[];
+    const nextVersions = (await versionsResponse.json()) as Version[];
+
+    setMessages(nextMessages);
+    setVersions(nextVersions);
+  }
+
+  useEffect(() => {
+    if (!currentTask || currentTask.status === "success" || currentTask.status === "failed") {
+      return;
+    }
+
+    let cancelled = false;
+    const timeout = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`${getClientApiBaseUrl()}/tasks/${currentTask.id}`);
+
+        if (!response.ok) {
+          throw new Error(await readApiErrorMessage(response));
+        }
+
+        const nextTask = (await response.json()) as GenerationTask;
+
+        if (cancelled) {
+          return;
+        }
+
+        setCurrentTask(nextTask);
+
+        if (nextTask.status === "success" || nextTask.status === "failed") {
+          setIsGenerating(false);
+          await refreshWorkspaceData();
+        }
+      } catch (taskError) {
+        if (cancelled) {
+          return;
+        }
+
+        const message =
+          taskError instanceof Error ? taskError.message : "刷新生成状态失败，请稍后重试。";
+        setError(message);
+        setIsGenerating(false);
+      }
+    }, 1200);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [currentTask, projectId]);
+
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (!SUPPORTED_FILE_TYPES.has(file.type)) {
+      setError("图片格式不支持，请上传 png、jpg、jpeg 或 webp。");
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+      setError("图片过大，当前最多支持 10MB。");
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      setError(null);
+      setIsUploading(true);
+
+      const formData = new FormData();
+      formData.append("projectId", projectId);
+      formData.append("file", file);
+
+      const response = await fetch(`${getClientApiBaseUrl()}/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(await readApiErrorMessage(response));
+      }
+
+      const uploadedAsset = (await response.json()) as UploadedAsset;
+      setPendingAsset(uploadedAsset);
+    } catch (uploadError) {
+      const message = uploadError instanceof Error ? uploadError.message : "上传图片失败，请稍后重试。";
+      setError(message);
+    } finally {
+      setIsUploading(false);
+      event.target.value = "";
+    }
+  }
+
+  function clearPendingAsset() {
+    setPendingAsset(null);
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!content.trim() && !pendingAsset?.assetId) {
+      setError("请输入备注内容或上传参考图。");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      setError(null);
+
+      const response = await fetch(`${getClientApiBaseUrl()}/projects/${projectId}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          role: "user",
+          content,
+          attachmentAssetId: pendingAsset?.assetId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readApiErrorMessage(response));
+      }
+
+      const message = (await response.json()) as Message;
+      setMessages((current) => [...current, message]);
+      setContent("");
+      clearPendingAsset();
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error ? submitError.message : "保存备注失败，请稍后重试。";
+      setError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleGenerate() {
+    if (!content.trim()) {
+      setError("请输入创作指令。");
+      return;
+    }
+
+    if (!selectedImageModel) {
+      setError("暂无可用的生图模型，请检查后端模型注册接口。");
+      return;
+    }
+
+    if (!pendingAsset && !selectedImageModel.supportsTextToImage) {
+      setError(`模型「${selectedImageModel.displayName}」不支持文生图，请更换模型或上传参考图。`);
+      return;
+    }
+
+    if (pendingAsset && !selectedImageModel.supportsImageToImage) {
+      setError(`模型「${selectedImageModel.displayName}」不支持图生图，请更换支持参考图的模型。`);
+      return;
+    }
+
+    if (!selectedImageModel.allowedSizes.includes(selectedSize)) {
+      setError(`模型「${selectedImageModel.displayName}」不支持当前图片比例。`);
+      return;
+    }
+
+    const optimisticMessage: Message = {
+      id: `optimistic-${Date.now()}`,
+      conversationId: messages[0]?.conversationId ?? "pending",
+      role: "user",
+      content,
+      attachmentAssetId: pendingAsset?.assetId ?? null,
+      attachmentAsset: pendingAsset
+        ? {
+            id: pendingAsset.assetId,
+            projectId,
+            type: "upload",
+            fileUrl: pendingAsset.fileUrl,
+            mimeType: pendingAsset.mimeType,
+            width: pendingAsset.width,
+            height: pendingAsset.height,
+            sizeBytes: pendingAsset.sizeBytes,
+            createdAt: new Date().toISOString(),
+          }
+        : null,
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      setError(null);
+      setIsGenerating(true);
+
+      const response = await fetch(`${getClientApiBaseUrl()}/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          projectId,
+          messageText: content,
+          sourceAssetId: pendingAsset?.assetId ?? null,
+          baseVersionId: null,
+          imageModelId: selectedImageModel.id,
+          size: selectedSize,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readApiErrorMessage(response));
+      }
+
+      const task = (await response.json()) as GenerationTask;
+      setCurrentTask(task);
+      setMessages((current) => [...current, optimisticMessage]);
+      setContent("");
+      clearPendingAsset();
+    } catch (generationError) {
+      const message =
+        generationError instanceof Error ? generationError.message : "启动生成任务失败，请稍后重试。";
+      setError(message);
+      setIsGenerating(false);
+    }
+  }
+
+  return (
+    <section className="grid min-h-[calc(100vh-104px)] gap-5 lg:grid-cols-[320px_minmax(0,1fr)_380px]">
+      <aside className="space-y-5">
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="mb-4 text-xs font-medium text-muted-foreground">项目信息</div>
+          <h1 className="text-2xl font-semibold leading-tight">{project.title}</h1>
+          <p className="mt-3 text-sm leading-7 text-muted-foreground">
+            {project.description ?? "暂未填写项目说明。"}
+          </p>
+          <div className="mt-5 grid gap-3 border-t border-border pt-4 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">创建时间</span>
+              <span className="text-right">{formatDateTime(project.createdAt)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">更新时间</span>
+              <span className="text-right">{formatDateTime(project.updatedAt)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2 font-semibold">
+              <History className="h-4 w-4 text-primary" />
+              版本记录
+            </div>
+            <span className="text-xs text-muted-foreground">{versions.length} 个版本</span>
+          </div>
+
+          {hasVersions ? (
+            <div className="space-y-3">
+              {versions.map((version, index) => (
+                <div
+                  key={version.id}
+                  className="rounded-2xl border border-border bg-background/70 p-3"
+                >
+                  <img
+                    src={resolveAssetUrl(version.outputAsset.fileUrl)}
+                    alt={`版本 ${version.versionIndex}`}
+                    className="aspect-[4/3] w-full rounded-xl object-cover"
+                  />
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <div className="font-medium">版本 {version.versionIndex}</div>
+                    {index === 0 ? (
+                      <span className="rounded-full bg-accent px-2 py-1 text-xs text-accent-foreground">
+                        当前版本
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                    {version.changeSummary ?? "暂无版本说明。"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-border bg-background/70 p-5 text-sm leading-7 text-muted-foreground">
+              暂无版本，点击「生成图片」创建第一版。
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <div className="space-y-5">
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm text-muted-foreground">图片预览</div>
+              <h2 className="text-xl font-semibold">当前生成结果</h2>
+            </div>
+            <div className={`rounded-full border px-3 py-1 text-sm ${statusTone}`}>
+              {generationStatus}
+            </div>
+          </div>
+
+          <div className="relative flex min-h-[520px] items-center justify-center overflow-hidden rounded-2xl border border-border bg-[#f6f5f2]">
+            {latestOutputAsset ? (
+              <img
+                src={resolveAssetUrl(latestOutputAsset.fileUrl)}
+                alt="当前生成结果"
+                className="max-h-[680px] w-full object-contain"
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-3 text-center text-muted-foreground">
+                <ImageIcon className="h-12 w-12 text-primary" />
+                <div className="text-base font-medium text-foreground">暂无生成结果</div>
+                <p className="max-w-sm text-sm leading-6">
+                  上传参考图并输入创作指令，生成结果会显示在这里。
+                </p>
+              </div>
+            )}
+
+            {isGenerating ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-white/70 backdrop-blur-sm">
+                <div className="flex items-center gap-3 rounded-full border border-border bg-white px-4 py-3 text-sm shadow-sm">
+                  <LoaderCircle className="h-4 w-4 animate-spin text-primary" />
+                  正在生成图片...
+                </div>
+              </div>
+            ) : null}
+
+            {currentTask?.status === "failed" ? (
+              <div className="absolute bottom-4 left-4 right-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                生成失败：{currentTask.errorMessage ?? "未返回具体错误原因。"}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="grid gap-5 xl:grid-cols-2">
+          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-center gap-2 font-semibold">
+              <ImageIcon className="h-4 w-4 text-primary" />
+              当前参考图
+            </div>
+            {latestReferenceAsset ? (
+              <div>
+                <img
+                  src={resolveAssetUrl(latestReferenceAsset.fileUrl)}
+                  alt="当前参考图"
+                  className="aspect-[4/3] w-full rounded-xl object-cover"
+                />
+                <div className="mt-2 text-xs text-muted-foreground">
+                  素材 ID：{latestReferenceAsset.id}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border bg-background/70 p-5 text-sm text-muted-foreground">
+                暂无参考图。
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-center gap-2 font-semibold">
+              <MessageSquare className="h-4 w-4 text-primary" />
+              对话记录
+            </div>
+            {hasMessages ? (
+              <div className="max-h-[260px] space-y-3 overflow-auto pr-1">
+                {messages.map((message) => (
+                  <div key={message.id} className="rounded-xl border border-border bg-background/70 p-3">
+                    <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{getRoleLabel(message.role)}</span>
+                      <span>{formatShortTime(message.createdAt)}</span>
+                    </div>
+                    {message.attachmentAsset ? (
+                      <img
+                        src={resolveAssetUrl(message.attachmentAsset.fileUrl)}
+                        alt="备注附件"
+                        className="mb-3 max-h-36 w-full rounded-lg object-cover"
+                      />
+                    ) : null}
+                    <div className="whitespace-pre-wrap text-sm leading-6">
+                      {message.content || "仅保存了参考图。"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border bg-background/70 p-5 text-sm text-muted-foreground">
+                暂无对话记录。
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <aside className="space-y-5">
+        <form
+          onSubmit={handleSubmit}
+          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+        >
+          <div className="mb-4">
+            <div className="text-sm text-muted-foreground">创作控制区</div>
+            <h2 className="text-xl font-semibold">生成图片</h2>
+          </div>
+
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+
+          <div className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => inputRef.current?.click()}
+              disabled={isUploading}
+            >
+              <ImagePlus className="h-4 w-4" />
+              {isUploading ? "上传中..." : "上传参考图"}
+            </Button>
+            {pendingAsset ? (
+              <button
+                type="button"
+                onClick={clearPendingAsset}
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-border bg-white px-3 text-sm text-muted-foreground hover:bg-secondary"
+              >
+                <X className="h-4 w-4" />
+                移除参考图
+              </button>
+            ) : null}
+          </div>
+
+          {pendingAsset ? (
+            <div className="mt-4 rounded-xl border border-border bg-background/70 p-3">
+              <div className="mb-2 text-sm font-medium">待使用参考图</div>
+              <img
+                src={resolveAssetUrl(pendingAsset.fileUrl)}
+                alt="待使用参考图"
+                className="max-h-52 w-full rounded-lg object-cover"
+              />
+              <div className="mt-2 text-xs text-muted-foreground">
+                素材 ID：{pendingAsset.assetId}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-5 space-y-3">
+            <div className="grid gap-3">
+              <label htmlFor="image-model" className="text-sm font-medium">
+                生图模型
+              </label>
+              <select
+                id="image-model"
+                value={selectedImageModel?.id ?? ""}
+                onChange={(event) => {
+                  const nextModel = imageModels.find((model) => model.id === event.target.value);
+                  setSelectedImageModelId(event.target.value);
+
+                  if (nextModel) {
+                    setSelectedSize(nextModel.defaultSize);
+                  }
+                }}
+                className="h-11 rounded-xl border border-input bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+              >
+                {compatibleImageModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.displayName}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid gap-3">
+              <label htmlFor="image-size" className="text-sm font-medium">
+                图片比例
+              </label>
+              <select
+                id="image-size"
+                value={selectedSize}
+                onChange={(event) => setSelectedSize(event.target.value)}
+                disabled={!selectedImageModel}
+                className="h-11 rounded-xl border border-input bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {(selectedImageModel?.allowedSizes ?? ["1:1"]).map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedImageModel ? (
+              <div className="rounded-xl border border-border bg-background/70 p-3 text-sm leading-6 text-muted-foreground">
+                <div className="font-medium text-foreground">
+                  {selectedImageModel.displayName}
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {formatProviderLabel(selectedImageModel.provider)} /{" "}
+                    {selectedImageModel.providerModel}
+                  </span>
+                </div>
+                <p className="mt-1">{selectedImageModel.description}</p>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                  {getCapabilityLabels(selectedImageModel).map((label) => (
+                    <span
+                      key={label}
+                      className="rounded-full border border-border bg-white px-2 py-1 text-foreground"
+                    >
+                      {label}
+                    </span>
+                  ))}
+                  <span className="rounded-full border border-border bg-white px-2 py-1 text-foreground">
+                    成本：{formatLevelLabel(selectedImageModel.costLevel)}
+                  </span>
+                  <span className="rounded-full border border-border bg-white px-2 py-1 text-foreground">
+                    速度：{formatLevelLabel(selectedImageModel.speedLevel)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                暂无可用的生图模型。
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 space-y-2">
+            <label htmlFor="creation-instruction" className="text-sm font-medium">
+              创作指令
+            </label>
+            <Textarea
+              id="creation-instruction"
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              placeholder="描述画面主体、风格、构图、需要保留或调整的元素。"
+              maxLength={4000}
+              className="min-h-[160px]"
+            />
+          </div>
+
+          {error ? (
+            <div className="mt-4 flex gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              {error}
+            </div>
+          ) : null}
+
+          <div className="mt-5 grid gap-3">
+            <Button
+              type="button"
+              size="lg"
+              disabled={isGenerating || isUploading}
+              onClick={handleGenerate}
+              className="w-full"
+            >
+              {isGenerating ? (
+                <>
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  生成中...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  生成图片
+                </>
+              )}
+            </Button>
+            <Button
+              type="submit"
+              variant="secondary"
+              disabled={isSubmitting || isUploading || isGenerating}
+              className="w-full"
+            >
+              <Send className="h-4 w-4" />
+              {isSubmitting ? "保存中..." : "仅保存备注"}
+            </Button>
+          </div>
+        </form>
+
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 font-semibold">
+              <Clock3 className="h-4 w-4 text-primary" />
+              生成状态
+            </div>
+            <span className={`rounded-full border px-3 py-1 text-xs ${statusTone}`}>
+              {generationStatus}
+            </span>
+          </div>
+
+          {currentTask ? (
+            <div className="space-y-3 text-sm text-muted-foreground">
+              <div className="rounded-xl bg-background/70 p-3">
+                <div>任务 ID：{currentTask.id}</div>
+                <div>任务类型：{currentTask.taskType}</div>
+                <div>模型：{currentTask.modelName}</div>
+              </div>
+              {currentTask.errorMessage ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">
+                  失败原因：{currentTask.errorMessage}
+                </div>
+              ) : null}
+              <details className="rounded-xl border border-border bg-background/70 p-3">
+                <summary className="cursor-pointer font-medium text-foreground">查看 Prompt</summary>
+                <div className="mt-3 space-y-3 text-xs leading-6">
+                  <div>
+                    <div className="mb-1 font-medium text-foreground">正向 Prompt</div>
+                    <p>{currentTask.promptText || "暂无 Prompt。"}</p>
+                  </div>
+                  <div>
+                    <div className="mb-1 font-medium text-foreground">负向 Prompt</div>
+                    <p>{currentTask.negativePromptText || "暂无负向 Prompt。"}</p>
+                  </div>
+                </div>
+              </details>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-border bg-background/70 p-4 text-sm text-muted-foreground">
+              还没有生成任务。
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="mb-3 flex items-center gap-2 font-semibold">
+            <FileText className="h-4 w-4 text-primary" />
+            备注说明
+          </div>
+          <p className="text-sm leading-7 text-muted-foreground">
+            「生成图片」会创建生成任务和版本记录；「仅保存备注」只写入对话记录，不会触发生成。
+          </p>
+        </div>
+      </aside>
+    </section>
+  );
+}

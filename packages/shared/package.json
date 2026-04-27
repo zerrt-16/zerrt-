@@ -1,0 +1,10 @@
+{
+  "name": "@ai-agent/shared",
+  "version": "0.1.0",
+  "private": true,
+  "files": [
+    "src"
+  ],
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AssetType {
+  upload
+  output
+  thumbnail
+}
+
+enum GenerationTaskStatus {
+  pending
+  running
+  success
+  failed
+}
+
+enum GenerationTaskType {
+  text_to_image
+  image_to_image
+}
+
+model AgentProject {
+  id              String           @id @default(cuid())
+  title           String
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  conversation    Conversation?
+  assets          Asset[]
+  generationTasks GenerationTask[]
+  imageVersions   ImageVersion[]
+}
+
+model Conversation {
+  id        String        @id @default(cuid())
+  projectId String        @unique
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  project    AgentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messages   Message[]
+  generationTasks GenerationTask[]
+}
+
+model Message {
+  id                String       @id @default(cuid())
+  conversationId    String
+  role              String
+  content           String
+  attachmentAssetId String?
+  createdAt         DateTime     @default(now())
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachmentAsset   Asset?       @relation(fields: [attachmentAssetId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@index([attachmentAssetId])
+}
+
+model Asset {
+  id                     String           @id @default(cuid())
+  projectId              String?
+  type                   AssetType
+  fileUrl                String
+  mimeType               String
+  width                  Int
+  height                 Int
+  sizeBytes              Int
+  createdAt              DateTime         @default(now())
+  project                AgentProject?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  messages               Message[]
+  sourceGenerationTasks  GenerationTask[] @relation("SourceAssetTasks")
+  outputVersions         ImageVersion[]   @relation("OutputAssetVersion")
+
+  @@index([projectId, createdAt])
+}
+
+model GenerationTask {
+  id                    String               @id @default(cuid())
+  projectId             String
+  conversationId        String
+  sourceAssetId         String?
+  baseVersionId         String?
+  taskType              GenerationTaskType
+  status                GenerationTaskStatus
+  modelName             String
+  promptText            String
+  negativePromptText    String?
+  structuredPayloadJson Json
+  errorMessage          String?
+  createdAt             DateTime             @default(now())
+  completedAt           DateTime?
+  project               AgentProject         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation          Conversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sourceAsset           Asset?               @relation("SourceAssetTasks", fields: [sourceAssetId], references: [id], onDelete: SetNull)
+  baseVersion           ImageVersion?        @relation("BaseVersionTasks", fields: [baseVersionId], references: [id], onDelete: SetNull)
+  generatedVersion      ImageVersion?        @relation("TaskGeneratedVersion")
+
+  @@index([projectId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ImageVersion {
+  id               String           @id @default(cuid())
+  projectId        String
+  generationTaskId String?          @unique
+  parentVersionId  String?
+  outputAssetId    String
+  versionIndex     Int
+  changeSummary    String?
+  createdAt        DateTime         @default(now())
+  project          AgentProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generationTask   GenerationTask?  @relation("TaskGeneratedVersion", fields: [generationTaskId], references: [id], onDelete: SetNull)
+  parentVersion    ImageVersion?    @relation("VersionLineage", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  childVersions    ImageVersion[]   @relation("VersionLineage")
+  outputAsset      Asset            @relation("OutputAssetVersion", fields: [outputAssetId], references: [id], onDelete: Restrict)
+  baseForTasks     GenerationTask[] @relation("BaseVersionTasks")
+
+  @@index([projectId, versionIndex])
+  @@index([projectId, createdAt])
+}

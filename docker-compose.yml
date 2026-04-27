@@ -1,0 +1,105 @@
+x-api-build: &api-build
+  context: .
+  dockerfile: Dockerfile
+  target: api
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-creator-agent-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai_creator_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api-migrate:
+    build: *api-build
+    image: ai-creator-agent-api:latest
+    container_name: ai-creator-agent-api-migrate
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-change_me}@postgres:5432/${POSTGRES_DB:-ai_creator_agent}?schema=public
+    command: ["npx", "prisma", "migrate", "deploy", "--schema", "prisma/schema.prisma"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: *api-build
+    image: ai-creator-agent-api:latest
+    container_name: ai-creator-agent-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-change_me}@postgres:5432/${POSTGRES_DB:-ai_creator_agent}?schema=public
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+    ports:
+      - "${API_PORT:-4000}:4000"
+    volumes:
+      - api_uploads:/app/apps/api/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
+        API_SERVER_BASE_URL: http://api:4000
+    image: ai-creator-agent-web:latest
+    container_name: ai-creator-agent-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      API_SERVER_BASE_URL: http://api:4000
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  api_uploads:

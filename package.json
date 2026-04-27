@@ -1,0 +1,27 @@
+{
+  "name": "ai-creator-agent-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@10.9.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev --parallel",
+    "dev:web": "npm run dev -w @ai-agent/web",
+    "dev:api": "npm run start:dev -w @ai-agent/api",
+    "build": "turbo build",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres",
+    "db:generate": "npm run prisma:generate -w @ai-agent/api",
+    "db:migrate": "npm run prisma:migrate -w @ai-agent/api",
+    "db:studio": "npm run prisma:studio -w @ai-agent/api",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.4.0",
+    "turbo": "^2.3.0"
+  }
+}
