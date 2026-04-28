@@ -1,4 +1,14 @@
-const API_BASE_URL = "/api";
+const API_PREFIX = "/api";
+const DEFAULT_BROWSER_API_BASE_URL = API_PREFIX;
+const DEFAULT_SERVER_API_BASE_URL = "http://api:4000";
+
+function trimSlashes(value: string) {
+  return value.replace(/^\/+|\/+$/g, "");
+}
+
+function withoutTrailingApi(value: string) {
+  return value.replace(/\/+$/, "").replace(/\/api$/i, "");
+}
 
 function normalizeApiPath(path: string) {
   if (/^https?:\/\//i.test(path)) {
@@ -6,32 +16,50 @@ function normalizeApiPath(path: string) {
       const url = new URL(path);
       path = `${url.pathname}${url.search}`;
     } catch {
-      return API_BASE_URL;
+      return "";
     }
   }
 
-  const normalizedPath = path
-    .trim()
-    .replace(/^\/+/, "")
-    .replace(/^api(?:\/|$)/i, "");
+  const clean = trimSlashes(path);
 
-  if (!normalizedPath) {
-    return API_BASE_URL;
-  }
-
-  return `${API_BASE_URL}/${normalizedPath}`;
-}
-
-export function getServerApiBaseUrl() {
-  return API_BASE_URL;
+  return clean.replace(/^api(?:\/|$)/i, "");
 }
 
 export function getClientApiBaseUrl() {
-  return API_BASE_URL;
+  const browserBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+
+  if (!browserBaseUrl || /^https?:\/\//i.test(browserBaseUrl)) {
+    return DEFAULT_BROWSER_API_BASE_URL;
+  }
+
+  return browserBaseUrl;
 }
 
-export function joinApiUrl(_apiBaseUrl: string, path: string) {
-  return normalizeApiPath(path);
+export function getServerApiBaseUrl() {
+  const serverBaseUrl = process.env.API_SERVER_BASE_URL?.trim() || DEFAULT_SERVER_API_BASE_URL;
+
+  return `${withoutTrailingApi(serverBaseUrl)}${API_PREFIX}`;
+}
+
+function getApiBaseUrl() {
+  return typeof window === "undefined" ? getServerApiBaseUrl() : getClientApiBaseUrl();
+}
+
+export function joinApiUrl(apiBaseUrl: string, path: string) {
+  const normalizedPath = normalizeApiPath(path);
+  const normalizedBaseUrl = /^https?:\/\//i.test(apiBaseUrl)
+    ? `${withoutTrailingApi(apiBaseUrl)}${API_PREFIX}`
+    : apiBaseUrl.replace(/\/+$/, "");
+
+  if (!normalizedPath) {
+    return normalizedBaseUrl;
+  }
+
+  return `${normalizedBaseUrl}/${normalizedPath}`;
+}
+
+export function getApiUrl(path: string) {
+  return joinApiUrl(getApiBaseUrl(), path);
 }
 
 function parseApiErrorMessage(status: number, responseBody: string) {
@@ -99,7 +127,7 @@ export async function readApiErrorMessage(response: Response) {
 }
 
 export async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = normalizeApiPath(path);
+  const url = getApiUrl(path);
   const method = init?.method ?? "GET";
 
   let response: Response;
