@@ -1,93 +1,138 @@
 # Deployment Checklist
 
-Use this checklist after deploying to Ubuntu ECS or after rebuilding the web/API images.
+This checklist verifies the production request chain on Ubuntu ECS:
 
-## 1. Environment
+- Browser requests same-origin `/api/...` on the web service.
+- Next.js rewrites `/api/:path*` to `http://api:4000/api/:path*` inside Docker.
+- Next.js server rendering uses `API_SERVER_BASE_URL=http://api:4000`.
+- NestJS keeps the real global route prefix `/api`.
+
+## 1. Required Environment
 
 For current public IP testing:
 
 ```env
+WEB_PORT=3000
+API_PORT=4000
 NEXT_PUBLIC_API_BASE_URL=/api
 API_SERVER_BASE_URL=http://api:4000
 CORS_ORIGIN=http://8.163.38.177:3000
 ```
 
-Browser requests should stay on the web origin and use `/api/...`. Next.js rewrites proxy those requests to `http://api:4000/api/...` inside Docker.
+APIMart values must be configured in `.env` without committing real keys:
 
-If the web image was already built before changing rewrite-related variables, rebuild the web image.
+```env
+APIMART_API_KEY=your_real_key
+APIMART_BASE_URL=https://api.apimart.ai/v1
+APIMART_MODEL=gpt-5.5
+APIMART_IMAGE_BASE_URL=https://api.apimart.ai/v1
+APIMART_IMAGE_MODEL=gpt-image-2
+APIMART_IMAGE_SIZE=1:1
+```
+
+## 2. Rebuild After Pulling Code
 
 ```bash
-docker compose build --no-cache web
+git pull
+docker compose down
+docker compose up -d --build
+```
+
+If only the web image needs to be rebuilt:
+
+```bash
+docker compose build web
 docker compose up -d web
 ```
 
-## 2. Container Status
+## 3. Required Command Verification
+
+Docker container status:
 
 ```bash
+docker ps
 docker compose ps
-docker compose logs --tail=100 api
-docker compose logs --tail=100 web
-docker compose logs --tail=100 api-migrate
 ```
 
-Expected:
-
-- `postgres` is running or healthy.
-- `api-migrate` exited successfully.
-- `api` is running or healthy.
-- `web` is running or healthy.
-
-## 3. Backend Health Check
-
-From the ECS host:
+API container health check:
 
 ```bash
-curl http://localhost:4000/api/health
+docker compose exec api wget -qO- http://localhost:4000/api/health
 ```
 
-Expected: the response should show PostgreSQL connected.
-
-## 4. Project APIs
-
-Project list:
+Web container can reach the API service through Docker DNS:
 
 ```bash
-curl http://localhost:4000/api/projects
+docker compose exec web wget -qO- http://api:4000/api/health
 ```
 
-Create project:
+Web container can read the project list through Docker DNS:
+
+```bash
+docker compose exec web wget -qO- http://api:4000/api/projects
+```
+
+Web container validates the Next.js rewrite path:
+
+```bash
+docker compose exec web wget -qO- http://localhost:3000/api/health
+```
+
+ECS host validates the public same-origin Next API proxy:
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+ECS host creates a project through the Next proxy:
+
+```bash
+curl -X POST http://localhost:3000/api/projects \
+  -H "Content-Type: application/json" \
+  -d '{"title":"代理验收项目","description":"通过 Next rewrite 创建"}'
+```
+
+ECS host creates a project by directly calling the backend:
 
 ```bash
 curl -X POST http://localhost:4000/api/projects \
   -H "Content-Type: application/json" \
-  -d '{"title":"测试项目","description":"测试说明"}'
+  -d '{"title":"后端直连项目","description":"直接后端创建"}'
 ```
 
-Expected:
+Expected project response:
 
-- Response contains `id`, `title`, `description`, `createdAt`, `updatedAt`.
-- The request body uses `title`, not `name`.
+```json
+{
+  "id": "...",
+  "title": "...",
+  "description": "...",
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
 
-## 5. Browser Validation
+## 4. Browser Verification
 
 1. Open `http://8.163.38.177:3000`.
-2. Open DevTools Network tab.
+2. Open DevTools Network.
 3. Create a project from the homepage.
-4. Confirm the browser request URL is same-origin:
+4. Confirm the browser request URL is:
 
 ```text
 http://8.163.38.177:3000/api/projects
 ```
 
-5. Confirm Next.js rewrites proxy it to the backend internally:
+5. Confirm the request body is:
 
-```text
-http://api:4000/api/projects
+```json
+{
+  "title": "项目名称输入值",
+  "description": "项目说明输入值"
+}
 ```
 
-This internal URL will not appear in the browser Network tab; it is handled by the web container.
-
-6. Confirm these incorrect URLs do not appear:
+6. Confirm these incorrect URLs never appear:
 
 ```text
 http://8.163.38.177:3000/http://8.163.38.177:4000/api/projects
@@ -95,21 +140,21 @@ http://8.163.38.177:4000/projects
 http://8.163.38.177:4000/api/api/projects
 ```
 
-7. If the request fails, check browser Console. The frontend logs failed API requests as:
+7. If a request fails, the UI should show only a short Chinese message such as:
 
 ```text
-[api-request-error]
+请求失败，状态码 404。
 ```
 
-The log includes:
+8. The browser Console may show `[api-request-error]` with:
 
 - `url`
 - `method`
 - `status`
-- `responseBody`
+- `responseBody` truncated to 500 characters
 - fetch error cause when available
 
-## 6. Image Workflow Smoke Test
+## 5. Upload And Generation Smoke Test
 
 1. Open a project workspace.
 2. Confirm `GET /api/image-models` returns `apimart-gpt-image-2` and `mock-image-provider`.
@@ -121,7 +166,7 @@ The log includes:
 8. Confirm the new version image URL starts with `/uploads/projects/.../outputs/...`.
 9. Refresh the page and confirm the version remains visible.
 
-## 7. Persistence Checks
+## 6. Persistence Checks
 
 Restart API only:
 
@@ -131,34 +176,12 @@ docker compose restart api
 
 Expected:
 
-- Existing projects remain in PostgreSQL.
+- Existing projects remain in PostgreSQL because `postgres_data` is a Docker volume.
 - Uploaded/generated images remain visible because `api_uploads` is a Docker volume.
 
-## 8. Rebuild Commands
+## 7. Future Nginx / Domain Mode
 
-Full rebuild:
-
-```bash
-docker compose up -d --build
-```
-
-Only rebuild frontend:
-
-```bash
-docker compose build --no-cache web
-docker compose up -d web
-```
-
-Only rebuild backend:
-
-```bash
-docker compose build api
-docker compose up -d api
-```
-
-## 9. Future Nginx / Domain Mode
-
-When using a domain and reverse proxy:
+When using a domain and HTTPS:
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=/api
@@ -169,9 +192,7 @@ CORS_ORIGIN=https://your-domain.com
 The reverse proxy should route:
 
 - `/` to `web:3000`
-- `/api` to `api:4000`
-- `/uploads` to `api:4000`
+- `/api` to `web:3000` if you keep Next rewrites as the proxy layer
+- `/uploads` to `web:3000` if you keep Next rewrites as the proxy layer
 
-Keep `API_SERVER_BASE_URL=http://api:4000` for server-side Next.js data fetching inside Docker.
-
-After confirming same-origin proxy works, the ECS security group can close public port `4000`. Keep only `3000` while testing by IP, or later expose only `80/443` through Nginx.
+After same-origin proxy mode is confirmed, the ECS security group can close public port `4000`. Keep only `3000` while testing by IP, or later expose only `80/443` through Nginx.

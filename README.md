@@ -45,7 +45,7 @@ To enable the real text agent through APIMart, open `apps/api/.env` and set:
 AI_TEXT_PROVIDER=apimart
 APIMART_API_KEY=your_apimart_api_key
 APIMART_BASE_URL=https://api.apimart.ai/v1
-APIMART_MODEL=gpt-5-mini
+APIMART_MODEL=gpt-5.5
 ```
 
 APIMart is the default text provider. The legacy OpenAI variables are still available only when `AI_TEXT_PROVIDER=openai`, but do not mix APIMart and OpenAI keys for the same provider. If the selected provider request fails, the backend falls back to a safe local planner so generation tasks can still finish successfully.
@@ -223,7 +223,7 @@ npm.cmd run dev:web
 AI_TEXT_PROVIDER=apimart
 APIMART_API_KEY=your_apimart_api_key
 APIMART_BASE_URL=https://api.apimart.ai/v1
-APIMART_MODEL=gpt-5-mini
+APIMART_MODEL=gpt-5.5
 ```
 
 2. Start the backend and frontend.
@@ -240,7 +240,7 @@ npm.cmd run dev:web
 7. Verify the task payload and version history:
 
 - `GET http://localhost:4000/api/tasks/{taskId}` should include a populated `structuredPayloadJson`
-- `modelName` should include `apimart/gpt-5-mini`
+- `modelName` should include `apimart/gpt-5.5`
 - `promptText` should be a rewritten image prompt, not just the raw user input
 - `negativePromptText` should be present
 - `GET http://localhost:4000/api/projects/{projectId}/versions` should return a version whose `changeSummary` matches the APIMart-generated `editSummary`
@@ -256,7 +256,7 @@ AI_TEXT_PROVIDER=apimart
 AI_IMAGE_PROVIDER=apimart
 APIMART_API_KEY=your_apimart_api_key
 APIMART_BASE_URL=https://api.apimart.ai/v1
-APIMART_MODEL=gpt-5-mini
+APIMART_MODEL=gpt-5.5
 APIMART_IMAGE_BASE_URL=https://api.apimart.ai/v1
 APIMART_IMAGE_MODEL=gpt-image-2
 APIMART_IMAGE_SIZE=1:1
@@ -440,7 +440,7 @@ Set APIMart credentials without committing them:
 AI_TEXT_PROVIDER=apimart
 AI_IMAGE_PROVIDER=apimart
 APIMART_API_KEY=your_real_apimart_key
-APIMART_MODEL=gpt-5-mini
+APIMART_MODEL=gpt-5.5
 APIMART_IMAGE_MODEL=gpt-image-2
 ```
 
@@ -462,8 +462,9 @@ docker compose logs -f web
 Open:
 
 - Web: `http://YOUR_ECS_PUBLIC_IP:3000`
-- API health: `http://YOUR_ECS_PUBLIC_IP:4000/api/health`
-- Image model registry: `http://YOUR_ECS_PUBLIC_IP:4000/api/image-models`
+- API health through Next proxy: `http://YOUR_ECS_PUBLIC_IP:3000/api/health`
+- Image model registry through Next proxy: `http://YOUR_ECS_PUBLIC_IP:3000/api/image-models`
+- Optional backend direct check on the ECS host: `curl http://localhost:4000/api/health`
 
 ### 4. Update And Redeploy
 

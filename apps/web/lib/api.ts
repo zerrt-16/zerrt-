@@ -6,11 +6,15 @@ function trimSlashes(value: string) {
   return value.replace(/^\/+|\/+$/g, "");
 }
 
-function withoutTrailingApi(value: string) {
-  return value.replace(/\/+$/, "").replace(/\/api$/i, "");
+function removeTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
 }
 
-function normalizeApiPath(path: string) {
+function withoutTrailingApi(value: string) {
+  return removeTrailingSlash(value).replace(/\/api$/i, "");
+}
+
+export function normalizeApiPath(path: string) {
   if (/^https?:\/\//i.test(path)) {
     try {
       const url = new URL(path);
@@ -32,7 +36,9 @@ export function getClientApiBaseUrl() {
     return DEFAULT_BROWSER_API_BASE_URL;
   }
 
-  return browserBaseUrl;
+  const normalizedBaseUrl = removeTrailingSlash(browserBaseUrl);
+
+  return normalizedBaseUrl.startsWith("/") ? normalizedBaseUrl : `/${normalizedBaseUrl}`;
 }
 
 export function getServerApiBaseUrl() {
@@ -49,7 +55,7 @@ export function joinApiUrl(apiBaseUrl: string, path: string) {
   const normalizedPath = normalizeApiPath(path);
   const normalizedBaseUrl = /^https?:\/\//i.test(apiBaseUrl)
     ? `${withoutTrailingApi(apiBaseUrl)}${API_PREFIX}`
-    : apiBaseUrl.replace(/\/+$/, "");
+    : removeTrailingSlash(apiBaseUrl);
 
   if (!normalizedPath) {
     return normalizedBaseUrl;
@@ -78,7 +84,7 @@ function parseApiErrorMessage(status: number, responseBody: string) {
       return payload.message;
     }
   } catch {
-    return responseBody;
+    return `请求失败，状态码 ${status}。`;
   }
 
   return `请求失败，状态码 ${status}。`;
@@ -103,7 +109,7 @@ function logApiError(input: {
     url: input.url,
     method: input.method,
     status: input.status,
-    responseBody: input.responseBody,
+    responseBody: input.responseBody?.slice(0, 500),
     error: input.error,
   });
 }
