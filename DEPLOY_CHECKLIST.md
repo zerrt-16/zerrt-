@@ -7,11 +7,14 @@ Use this checklist after deploying to Ubuntu ECS or after rebuilding the web/API
 For current public IP testing:
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=http://8.163.38.177:4000
+NEXT_PUBLIC_API_BASE_URL=/api
+API_SERVER_BASE_URL=http://api:4000
 CORS_ORIGIN=http://8.163.38.177:3000
 ```
 
-If the web image was already built before changing `NEXT_PUBLIC_API_BASE_URL`, rebuild the web image because Next.js bundles public env values at build time.
+Browser requests should stay on the web origin and use `/api/...`. Next.js rewrites proxy those requests to `http://api:4000/api/...` inside Docker.
+
+If the web image was already built before changing rewrite-related variables, rebuild the web image.
 
 ```bash
 docker compose build --no-cache web
@@ -70,13 +73,21 @@ Expected:
 1. Open `http://8.163.38.177:3000`.
 2. Open DevTools Network tab.
 3. Create a project from the homepage.
-4. Confirm the request URL is:
+4. Confirm the browser request URL is same-origin:
 
 ```text
-http://8.163.38.177:4000/api/projects
+http://8.163.38.177:3000/api/projects
 ```
 
-5. Confirm these incorrect URLs do not appear:
+5. Confirm Next.js rewrites proxy it to the backend internally:
+
+```text
+http://api:4000/api/projects
+```
+
+This internal URL will not appear in the browser Network tab; it is handled by the web container.
+
+6. Confirm these incorrect URLs do not appear:
 
 ```text
 http://8.163.38.177:3000/http://8.163.38.177:4000/api/projects
@@ -84,7 +95,7 @@ http://8.163.38.177:4000/projects
 http://8.163.38.177:4000/api/api/projects
 ```
 
-6. If the request fails, check browser Console. The frontend logs failed API requests as:
+7. If the request fails, check browser Console. The frontend logs failed API requests as:
 
 ```text
 [api-request-error]
@@ -151,6 +162,7 @@ When using a domain and reverse proxy:
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=/api
+API_SERVER_BASE_URL=http://api:4000
 CORS_ORIGIN=https://your-domain.com
 ```
 
@@ -161,3 +173,5 @@ The reverse proxy should route:
 - `/uploads` to `api:4000`
 
 Keep `API_SERVER_BASE_URL=http://api:4000` for server-side Next.js data fetching inside Docker.
+
+After confirming same-origin proxy works, the ECS security group can close public port `4000`. Keep only `3000` while testing by IP, or later expose only `80/443` through Nginx.

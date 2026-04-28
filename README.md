@@ -89,17 +89,18 @@ npm.cmd run dev
 
 ## Integration Notes
 
-- Browser requests use `NEXT_PUBLIC_API_BASE_URL`
+- Browser requests use same-origin `/api`
 - Next.js server-side requests use `API_SERVER_BASE_URL`
-- The frontend normalizes these values to `${BASE_URL}/api`, so use an origin such as `http://localhost:4000`
-- The API enables CORS for `http://localhost:3000` by default
+- Next.js rewrites proxy `/api/:path*` to `${API_SERVER_BASE_URL}/api/:path*`
+- Next.js rewrites proxy `/uploads/:path*` to `${API_SERVER_BASE_URL}/uploads/:path*`
+- The API enables CORS for `http://localhost:3000` by default, but browser traffic normally stays on the web origin
 
 ## Environment Modes
 
 Local development:
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
+NEXT_PUBLIC_API_BASE_URL=/api
 API_SERVER_BASE_URL=http://localhost:4000
 CORS_ORIGIN=http://localhost:3000
 ```
@@ -107,7 +108,7 @@ CORS_ORIGIN=http://localhost:3000
 Current ECS public IP testing:
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=http://8.163.38.177:4000
+NEXT_PUBLIC_API_BASE_URL=/api
 API_SERVER_BASE_URL=http://api:4000
 CORS_ORIGIN=http://8.163.38.177:3000
 ```
@@ -120,7 +121,7 @@ API_SERVER_BASE_URL=http://api:4000
 CORS_ORIGIN=https://your-domain.com
 ```
 
-When `NEXT_PUBLIC_API_BASE_URL` is a full URL such as `http://8.163.38.177:4000`, browser requests go directly to `http://8.163.38.177:4000/api/...`. When it is empty or `/api`, browser requests use same-origin `/api`, which is useful after adding an Nginx reverse proxy. Rebuild the web image after changing `NEXT_PUBLIC_API_BASE_URL` because Next.js bundles public environment variables at build time.
+Browser requests should stay same-origin, for example `/api/projects`. Next.js rewrites proxy those requests to the NestJS API inside Docker, for example `http://api:4000/api/projects`. After this proxy mode is enabled, the browser should not request `http://8.163.38.177:4000/api/...` directly. In ECS security groups, you can later close public port `4000` and keep only `3000` for IP testing, or `80/443` after adding Nginx.
 
 ## Task 2 Local Verification
 
@@ -417,10 +418,11 @@ cp .env.example .env
 nano .env
 ```
 
-For public IP testing, replace `203.0.113.10` with your ECS public IP:
+For public IP testing, keep browser API requests same-origin and replace the web origin with your ECS public IP:
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=http://YOUR_ECS_PUBLIC_IP:4000
+NEXT_PUBLIC_API_BASE_URL=/api
+API_SERVER_BASE_URL=http://api:4000
 CORS_ORIGIN=http://YOUR_ECS_PUBLIC_IP:3000
 ```
 
@@ -478,7 +480,7 @@ If only environment variables changed:
 docker compose up -d --force-recreate api web
 ```
 
-If `NEXT_PUBLIC_API_BASE_URL` changed, rebuild the web image because public Next.js variables are bundled at build time:
+If `API_SERVER_BASE_URL` changed, rebuild the web image because Next.js rewrites are read from the web build/runtime config:
 
 ```bash
 docker compose build web
@@ -539,4 +541,4 @@ For a domain and HTTPS, put Nginx or another reverse proxy in front of the conta
 - Set `NEXT_PUBLIC_API_BASE_URL=/api`
 - Set `API_SERVER_BASE_URL=http://api:4000`
 - Set `CORS_ORIGIN=https://your-domain.com`
-- Rebuild the web image after changing `NEXT_PUBLIC_API_BASE_URL`
+- Rebuild the web image after changing rewrite-related environment variables

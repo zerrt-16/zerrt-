@@ -1,76 +1,37 @@
-const CLIENT_FALLBACK_API_BASE_URL = "/api";
-const SERVER_FALLBACK_API_BASE_URL = "http://localhost:4000/api";
+const API_BASE_URL = "/api";
 
-function isAbsoluteHttpUrl(value?: string | null) {
-  return typeof value === "string" && /^https?:\/\//i.test(value.trim().replace(/^\/+/, ""));
-}
-
-function normalizeApiBaseUrl(value?: string | null, fallback = CLIENT_FALLBACK_API_BASE_URL) {
-  const trimmedValue = value?.trim().replace(/^\/+(?=https?:\/\/)/i, "");
-
-  if (!trimmedValue) {
-    return fallback;
-  }
-
-  const baseUrl = /^https?:\/\//i.test(trimmedValue)
-    ? trimmedValue
-    : trimmedValue.startsWith("/")
-      ? trimmedValue
-      : `/${trimmedValue}`;
-  const withoutTrailingSlash = baseUrl.replace(/\/+$/, "");
-
-  if (/\/api$/i.test(withoutTrailingSlash)) {
-    return withoutTrailingSlash;
-  }
-
-  return `${withoutTrailingSlash}/api`;
-}
-
-export function getServerApiBaseUrl() {
-  const publicApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_URL;
-
-  return normalizeApiBaseUrl(
-    process.env.API_SERVER_BASE_URL ??
-      process.env.API_SERVER_URL ??
-      (isAbsoluteHttpUrl(publicApiBaseUrl) ? publicApiBaseUrl : undefined),
-    SERVER_FALLBACK_API_BASE_URL,
-  );
-}
-
-export function getClientApiBaseUrl() {
-  return normalizeApiBaseUrl(
-    process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_URL,
-    CLIENT_FALLBACK_API_BASE_URL,
-  );
-}
-
-function getApiOrigin(apiBaseUrl: string) {
-  if (!/^https?:\/\//i.test(apiBaseUrl)) {
-    return typeof window !== "undefined" ? window.location.origin : "";
-  }
-
-  try {
-    return new URL(apiBaseUrl).origin;
-  } catch {
-    return "";
-  }
-}
-
-export function joinApiUrl(apiBaseUrl: string, path: string) {
+function normalizeApiPath(path: string) {
   if (/^https?:\/\//i.test(path)) {
-    return path;
+    try {
+      const url = new URL(path);
+      path = `${url.pathname}${url.search}`;
+    } catch {
+      return API_BASE_URL;
+    }
   }
 
-  const normalizedBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
   const normalizedPath = path
+    .trim()
     .replace(/^\/+/, "")
     .replace(/^api(?:\/|$)/i, "");
 
   if (!normalizedPath) {
-    return normalizedBaseUrl;
+    return API_BASE_URL;
   }
 
-  return `${normalizedBaseUrl.replace(/\/+$/, "")}/${normalizedPath}`;
+  return `${API_BASE_URL}/${normalizedPath}`;
+}
+
+export function getServerApiBaseUrl() {
+  return API_BASE_URL;
+}
+
+export function getClientApiBaseUrl() {
+  return API_BASE_URL;
+}
+
+export function joinApiUrl(_apiBaseUrl: string, path: string) {
+  return normalizeApiPath(path);
 }
 
 function parseApiErrorMessage(status: number, responseBody: string) {
@@ -119,7 +80,7 @@ function logApiError(input: {
   });
 }
 
-export function resolveAssetUrl(fileUrl: string, apiBaseUrl = getClientApiBaseUrl()) {
+export function resolveAssetUrl(fileUrl: string) {
   if (!fileUrl) {
     return "";
   }
@@ -128,7 +89,7 @@ export function resolveAssetUrl(fileUrl: string, apiBaseUrl = getClientApiBaseUr
     return fileUrl;
   }
 
-  return `${getApiOrigin(apiBaseUrl)}${fileUrl.startsWith("/") ? fileUrl : `/${fileUrl}`}`;
+  return fileUrl.startsWith("/") ? fileUrl : `/${fileUrl}`;
 }
 
 export async function readApiErrorMessage(response: Response) {
@@ -137,12 +98,8 @@ export async function readApiErrorMessage(response: Response) {
   return parseApiErrorMessage(response.status, responseBody);
 }
 
-export async function requestApi<T>(
-  path: string,
-  init?: RequestInit,
-  apiBaseUrl = getClientApiBaseUrl(),
-): Promise<T> {
-  const url = joinApiUrl(apiBaseUrl, path);
+export async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = normalizeApiPath(path);
   const method = init?.method ?? "GET";
 
   let response: Response;
@@ -175,9 +132,7 @@ export async function requestApi<T>(
 }
 
 export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = joinApiUrl(getServerApiBaseUrl(), path);
-  const method = init?.method ?? "GET";
-  const response = await fetch(url, {
+  return requestApi<T>(path, {
     ...init,
     cache: "no-store",
     headers: {
@@ -185,19 +140,4 @@ export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> 
       ...(init?.headers ?? {}),
     },
   });
-
-  if (!response.ok) {
-    const responseBody = await readResponseBody(response.clone());
-
-    logApiError({
-      url,
-      method,
-      status: response.status,
-      responseBody,
-    });
-
-    throw new Error(parseApiErrorMessage(response.status, responseBody));
-  }
-
-  return (await response.json()) as T;
 }

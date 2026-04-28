@@ -73,7 +73,7 @@ services:
       dockerfile: Dockerfile
       target: web
       args:
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
         API_SERVER_BASE_URL: http://api:4000
     image: ai-creator-agent-web:latest
     container_name: ai-creator-agent-web
@@ -82,7 +82,7 @@ services:
       NODE_ENV: production
       PORT: 3000
       API_SERVER_BASE_URL: http://api:4000
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:
