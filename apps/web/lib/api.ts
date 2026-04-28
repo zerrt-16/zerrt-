@@ -1,21 +1,25 @@
 const CLIENT_FALLBACK_API_BASE_URL = "/api";
-const SERVER_FALLBACK_API_BASE_URL =
-  process.env.NODE_ENV === "production" ? "/api" : "http://localhost:4000/api";
+const SERVER_FALLBACK_API_BASE_URL = "http://localhost:4000/api";
+
+function isAbsoluteHttpUrl(value?: string | null) {
+  return typeof value === "string" && /^https?:\/\//i.test(value.trim().replace(/^\/+/, ""));
+}
 
 function normalizeApiBaseUrl(value?: string | null, fallback = CLIENT_FALLBACK_API_BASE_URL) {
-  const trimmedValue = value?.trim().replace(/^\/+(https?:\/\/)/i, "$1");
+  const trimmedValue = value?.trim().replace(/^\/+(?=https?:\/\/)/i, "");
 
   if (!trimmedValue) {
     return fallback;
   }
 
-  const withLeadingSlash =
-    /^https?:\/\//i.test(trimmedValue) || trimmedValue.startsWith("/")
+  const baseUrl = /^https?:\/\//i.test(trimmedValue)
+    ? trimmedValue
+    : trimmedValue.startsWith("/")
       ? trimmedValue
       : `/${trimmedValue}`;
-  const withoutTrailingSlash = withLeadingSlash.replace(/\/+$/, "");
+  const withoutTrailingSlash = baseUrl.replace(/\/+$/, "");
 
-  if (withoutTrailingSlash.endsWith("/api")) {
+  if (/\/api$/i.test(withoutTrailingSlash)) {
     return withoutTrailingSlash;
   }
 
@@ -23,11 +27,12 @@ function normalizeApiBaseUrl(value?: string | null, fallback = CLIENT_FALLBACK_A
 }
 
 export function getServerApiBaseUrl() {
+  const publicApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_URL;
+
   return normalizeApiBaseUrl(
     process.env.API_SERVER_BASE_URL ??
       process.env.API_SERVER_URL ??
-      process.env.NEXT_PUBLIC_API_BASE_URL ??
-      process.env.NEXT_PUBLIC_API_URL,
+      (isAbsoluteHttpUrl(publicApiBaseUrl) ? publicApiBaseUrl : undefined),
     SERVER_FALLBACK_API_BASE_URL,
   );
 }
@@ -57,9 +62,61 @@ export function joinApiUrl(apiBaseUrl: string, path: string) {
   }
 
   const normalizedBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const normalizedPath = path
+    .replace(/^\/+/, "")
+    .replace(/^api(?:\/|$)/i, "");
 
-  return `${normalizedBaseUrl.replace(/\/+$/, "")}${normalizedPath}`;
+  if (!normalizedPath) {
+    return normalizedBaseUrl;
+  }
+
+  return `${normalizedBaseUrl.replace(/\/+$/, "")}/${normalizedPath}`;
+}
+
+function parseApiErrorMessage(status: number, responseBody: string) {
+  if (!responseBody.trim()) {
+    return `请求失败，状态码 ${status}。`;
+  }
+
+  try {
+    const payload = JSON.parse(responseBody) as { message?: string | string[] };
+
+    if (Array.isArray(payload.message)) {
+      return payload.message.join(", ");
+    }
+
+    if (typeof payload.message === "string" && payload.message.trim()) {
+      return payload.message;
+    }
+  } catch {
+    return responseBody;
+  }
+
+  return `请求失败，状态码 ${status}。`;
+}
+
+async function readResponseBody(response: Response) {
+  try {
+    return await response.text();
+  } catch {
+    return "";
+  }
+}
+
+function logApiError(input: {
+  url: string;
+  method: string;
+  status?: number;
+  responseBody?: string;
+  error?: unknown;
+}) {
+  console.error("[api-request-error]", {
+    url: input.url,
+    method: input.method,
+    status: input.status,
+    responseBody: input.responseBody,
+    error: input.error,
+  });
 }
 
 export function resolveAssetUrl(fileUrl: string, apiBaseUrl = getClientApiBaseUrl()) {
@@ -75,24 +132,52 @@ export function resolveAssetUrl(fileUrl: string, apiBaseUrl = getClientApiBaseUr
 }
 
 export async function readApiErrorMessage(response: Response) {
-  try {
-    const payload = (await response.json()) as { message?: string | string[] };
-    if (Array.isArray(payload.message)) {
-      return payload.message.join(", ");
-    }
+  const responseBody = await readResponseBody(response.clone());
 
-    if (typeof payload.message === "string") {
-      return payload.message;
-    }
-  } catch {
-    return `请求失败，状态码 ${response.status}。`;
+  return parseApiErrorMessage(response.status, responseBody);
+}
+
+export async function requestApi<T>(
+  path: string,
+  init?: RequestInit,
+  apiBaseUrl = getClientApiBaseUrl(),
+): Promise<T> {
+  const url = joinApiUrl(apiBaseUrl, path);
+  const method = init?.method ?? "GET";
+
+  let response: Response;
+
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    logApiError({ url, method, error });
+    throw error;
   }
 
-  return `请求失败，状态码 ${response.status}。`;
+  if (!response.ok) {
+    const responseBody = await readResponseBody(response.clone());
+
+    logApiError({
+      url,
+      method,
+      status: response.status,
+      responseBody,
+    });
+
+    throw new Error(parseApiErrorMessage(response.status, responseBody));
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
 }
 
 export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(joinApiUrl(getServerApiBaseUrl(), path), {
+  const url = joinApiUrl(getServerApiBaseUrl(), path);
+  const method = init?.method ?? "GET";
+  const response = await fetch(url, {
     ...init,
     cache: "no-store",
     headers: {
@@ -102,7 +187,16 @@ export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> 
   });
 
   if (!response.ok) {
-    throw new Error(`接口请求失败，状态码 ${response.status}。`);
+    const responseBody = await readResponseBody(response.clone());
+
+    logApiError({
+      url,
+      method,
+      status: response.status,
+      responseBody,
+    });
+
+    throw new Error(parseApiErrorMessage(response.status, responseBody));
   }
 
   return (await response.json()) as T;

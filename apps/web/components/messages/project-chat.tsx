@@ -17,7 +17,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { getClientApiBaseUrl, readApiErrorMessage, resolveAssetUrl } from "@/lib/api";
+import { requestApi, resolveAssetUrl } from "@/lib/api";
 import type {
   Asset,
   GenerationTask,
@@ -258,21 +258,10 @@ export function ProjectChat({
   }, [compatibleImageModels, selectedImageModelId]);
 
   async function refreshWorkspaceData() {
-    const [messagesResponse, versionsResponse] = await Promise.all([
-      fetch(`${getClientApiBaseUrl()}/projects/${projectId}/messages`),
-      fetch(`${getClientApiBaseUrl()}/projects/${projectId}/versions`),
+    const [nextMessages, nextVersions] = await Promise.all([
+      requestApi<Message[]>(`/projects/${projectId}/messages`),
+      requestApi<Version[]>(`/projects/${projectId}/versions`),
     ]);
-
-    if (!messagesResponse.ok) {
-      throw new Error(await readApiErrorMessage(messagesResponse));
-    }
-
-    if (!versionsResponse.ok) {
-      throw new Error(await readApiErrorMessage(versionsResponse));
-    }
-
-    const nextMessages = (await messagesResponse.json()) as Message[];
-    const nextVersions = (await versionsResponse.json()) as Version[];
 
     setMessages(nextMessages);
     setVersions(nextVersions);
@@ -286,13 +275,7 @@ export function ProjectChat({
     let cancelled = false;
     const timeout = window.setTimeout(async () => {
       try {
-        const response = await fetch(`${getClientApiBaseUrl()}/tasks/${currentTask.id}`);
-
-        if (!response.ok) {
-          throw new Error(await readApiErrorMessage(response));
-        }
-
-        const nextTask = (await response.json()) as GenerationTask;
+        const nextTask = await requestApi<GenerationTask>(`/tasks/${currentTask.id}`);
 
         if (cancelled) {
           return;
@@ -349,16 +332,10 @@ export function ProjectChat({
       formData.append("projectId", projectId);
       formData.append("file", file);
 
-      const response = await fetch(`${getClientApiBaseUrl()}/upload`, {
+      const uploadedAsset = await requestApi<UploadedAsset>("/upload", {
         method: "POST",
         body: formData,
       });
-
-      if (!response.ok) {
-        throw new Error(await readApiErrorMessage(response));
-      }
-
-      const uploadedAsset = (await response.json()) as UploadedAsset;
       setPendingAsset(uploadedAsset);
     } catch (uploadError) {
       const message = uploadError instanceof Error ? uploadError.message : "上传图片失败，请稍后重试。";
@@ -388,7 +365,7 @@ export function ProjectChat({
       setIsSubmitting(true);
       setError(null);
 
-      const response = await fetch(`${getClientApiBaseUrl()}/projects/${projectId}/messages`, {
+      const message = await requestApi<Message>(`/projects/${projectId}/messages`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -399,12 +376,6 @@ export function ProjectChat({
           attachmentAssetId: pendingAsset?.assetId,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error(await readApiErrorMessage(response));
-      }
-
-      const message = (await response.json()) as Message;
       setMessages((current) => [...current, message]);
       setContent("");
       clearPendingAsset();
@@ -469,7 +440,7 @@ export function ProjectChat({
       setError(null);
       setIsGenerating(true);
 
-      const response = await fetch(`${getClientApiBaseUrl()}/generate`, {
+      const task = await requestApi<GenerationTask>("/generate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -483,12 +454,6 @@ export function ProjectChat({
           size: selectedSize,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error(await readApiErrorMessage(response));
-      }
-
-      const task = (await response.json()) as GenerationTask;
       setCurrentTask(task);
       setMessages((current) => [...current, optimisticMessage]);
       setContent("");

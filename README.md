@@ -94,6 +94,34 @@ npm.cmd run dev
 - The frontend normalizes these values to `${BASE_URL}/api`, so use an origin such as `http://localhost:4000`
 - The API enables CORS for `http://localhost:3000` by default
 
+## Environment Modes
+
+Local development:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
+API_SERVER_BASE_URL=http://localhost:4000
+CORS_ORIGIN=http://localhost:3000
+```
+
+Current ECS public IP testing:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://8.163.38.177:4000
+API_SERVER_BASE_URL=http://api:4000
+CORS_ORIGIN=http://8.163.38.177:3000
+```
+
+Future domain with Nginx reverse proxy:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=/api
+API_SERVER_BASE_URL=http://api:4000
+CORS_ORIGIN=https://your-domain.com
+```
+
+When `NEXT_PUBLIC_API_BASE_URL` is a full URL such as `http://8.163.38.177:4000`, browser requests go directly to `http://8.163.38.177:4000/api/...`. When it is empty or `/api`, browser requests use same-origin `/api`, which is useful after adding an Nginx reverse proxy. Rebuild the web image after changing `NEXT_PUBLIC_API_BASE_URL` because Next.js bundles public environment variables at build time.
+
 ## Task 2 Local Verification
 
 1. Make sure PostgreSQL is running and the API env points to the correct database.
@@ -508,6 +536,7 @@ For a domain and HTTPS, put Nginx or another reverse proxy in front of the conta
 
 - Proxy `/` to `web:3000`
 - Proxy `/api` and `/uploads` to `api:4000`
-- Set `NEXT_PUBLIC_API_BASE_URL=https://your-domain.com`
+- Set `NEXT_PUBLIC_API_BASE_URL=/api`
+- Set `API_SERVER_BASE_URL=http://api:4000`
 - Set `CORS_ORIGIN=https://your-domain.com`
 - Rebuild the web image after changing `NEXT_PUBLIC_API_BASE_URL`

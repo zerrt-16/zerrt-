@@ -6,7 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { getClientApiBaseUrl, readApiErrorMessage } from "@/lib/api";
+import { requestApi } from "@/lib/api";
 import type { Project } from "@/lib/types";
 
 export function CreateProjectForm() {
@@ -31,7 +31,7 @@ export function CreateProjectForm() {
       setIsSubmitting(true);
       setError(null);
 
-      const response = await fetch(`${getClientApiBaseUrl()}/projects`, {
+      const project = await requestApi<Project>("/projects", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -41,12 +41,6 @@ export function CreateProjectForm() {
           description: projectDescription,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error(await readApiErrorMessage(response));
-      }
-
-      const project = (await response.json()) as Project;
       router.push(`/projects/${project.id}`);
       router.refresh();
     } catch (submitError) {
