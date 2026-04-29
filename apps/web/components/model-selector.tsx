@@ -15,7 +15,7 @@ type ModelSelectorProps = {
 };
 
 function getModelDisplayName(model: ImageModel) {
-  if (model.id === "apimart-gpt-image-2") {
+  if (model.id === "gpt-image-2" || model.id === "apimart-gpt-image-2") {
     return "GPT Image 2";
   }
 
@@ -27,7 +27,7 @@ function getModelDescription(model: ImageModel) {
     return "适合电商视觉、真实质感、人像与产品细节强化。";
   }
 
-  if (model.id === "apimart-gpt-image-2") {
+  if (model.id === "gpt-image-2" || model.id === "apimart-gpt-image-2") {
     return "稳定通用的图像生成模型，适合产品图、材质优化与真实感创作。";
   }
 

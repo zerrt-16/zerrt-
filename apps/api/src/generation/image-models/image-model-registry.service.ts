@@ -4,63 +4,16 @@ import { GenerationTaskType } from "@prisma/client";
 
 import { ImageModelDefinition } from "./image-model.types";
 
-const IMAGE_MODELS: ImageModelDefinition[] = [
-  {
-    id: "apimart-gpt-image-2",
-    name: "GPT Image 2",
-    displayName: "GPT Image 2",
-    provider: "apimart",
-    providerModel: "gpt-image-2",
-    enabled: true,
-    supportsTextToImage: true,
-    supportsImageToImage: true,
-    supportsMultiImage: false,
-    allowedSizes: ["1:1", "4:3", "3:4", "16:9", "9:16"],
-    defaultSize: "1:1",
-    costLevel: "medium",
-    speedLevel: "medium",
-    description: "适合电商产品图、材质优化、通用真实感生成。",
-  },
-  {
-    id: "nano-banana-pro",
-    name: "Nano Banana Pro",
-    displayName: "Nano Banana Pro",
-    provider: "apimart",
-    providerModel: "nano-banana-pro",
-    enabled: true,
-    supportsTextToImage: true,
-    supportsImageToImage: true,
-    supportsMultiImage: false,
-    allowedSizes: ["1:1", "4:3", "3:4", "16:9", "9:16"],
-    defaultSize: "1:1",
-    costLevel: "medium",
-    speedLevel: "medium",
-    description: "高质量图像生成模型，适合电商视觉、真实感、人像/产品质感强化。",
-  },
-  {
-    id: "mock-image-provider",
-    name: "Mock Image Provider",
-    displayName: "Mock Image Provider",
-    provider: "mock",
-    providerModel: "mock-image-provider",
-    enabled: true,
-    supportsTextToImage: true,
-    supportsImageToImage: true,
-    supportsMultiImage: false,
-    allowedSizes: ["1:1"],
-    defaultSize: "1:1",
-    costLevel: "low",
-    speedLevel: "high",
-    description: "开发测试用模型，不调用真实图像接口，便于快速验证流程。",
-  },
-];
+const MODEL_ID_ALIASES: Record<string, string> = {
+  "apimart-gpt-image-2": "gpt-image-2",
+};
 
 @Injectable()
 export class ImageModelRegistryService {
   constructor(private readonly configService: ConfigService) {}
 
   listEnabled() {
-    return IMAGE_MODELS.filter((model) => model.enabled);
+    return this.getImageModels().filter((model) => model.enabled && model.available);
   }
 
   resolveForRequest(input: {
@@ -86,13 +39,74 @@ export class ImageModelRegistryService {
   }
 
   findEnabledOrThrow(imageModelId: string) {
-    const model = this.listEnabled().find((item) => item.id === imageModelId);
+    const normalizedImageModelId = this.normalizeModelId(imageModelId);
+    const model = this.listEnabled().find((item) => item.id === normalizedImageModelId);
 
     if (!model) {
       throw new BadRequestException(`未找到可用的生图模型：${imageModelId}。`);
     }
 
     return model;
+  }
+
+  private getImageModels(): ImageModelDefinition[] {
+    const nanoBananaProviderModel =
+      this.configService.get<string>("APIMART_NANO_BANANA_PRO_MODEL")?.trim() ||
+      "gemini-3-pro-image-preview";
+
+    return [
+      {
+        id: "gpt-image-2",
+        name: "GPT Image 2",
+        displayName: "GPT Image 2",
+        provider: "apimart",
+        providerModel: "gpt-image-2",
+        enabled: true,
+        available: true,
+        supportsTextToImage: true,
+        supportsImageToImage: true,
+        supportsMultiImage: false,
+        allowedSizes: ["1:1", "4:3", "3:4", "16:9", "9:16"],
+        defaultSize: "1:1",
+        costLevel: "medium",
+        speedLevel: "medium",
+        description: "稳定通用的图像生成模型，适合产品图、材质优化与真实感创作。",
+      },
+      {
+        id: "nano-banana-pro",
+        name: "Nano Banana Pro",
+        displayName: "Nano Banana Pro",
+        provider: "apimart",
+        providerModel: nanoBananaProviderModel,
+        enabled: true,
+        available: true,
+        supportsTextToImage: true,
+        supportsImageToImage: true,
+        supportsMultiImage: false,
+        allowedSizes: ["1:1", "4:3", "3:4", "16:9", "9:16"],
+        defaultSize: "1:1",
+        costLevel: "medium",
+        speedLevel: "medium",
+        description: "适合电商视觉、真实质感、人像与产品细节强化。",
+      },
+      {
+        id: "mock-image-provider",
+        name: "Mock Image Provider",
+        displayName: "Mock Image Provider",
+        provider: "mock",
+        providerModel: "mock",
+        enabled: true,
+        available: true,
+        supportsTextToImage: true,
+        supportsImageToImage: true,
+        supportsMultiImage: false,
+        allowedSizes: ["1:1"],
+        defaultSize: "1:1",
+        costLevel: "low",
+        speedLevel: "high",
+        description: "开发测试用模型，不调用真实图像接口，便于快速验证流程。",
+      },
+    ];
   }
 
   private getDefaultModel() {
@@ -108,14 +122,24 @@ export class ImageModelRegistryService {
     }
 
     if (provider === "apimart") {
+      const normalizedApimartModelId = this.normalizeModelId(apimartModel);
+
       return (
         this.listEnabled().find(
-          (model) => model.provider === "apimart" && model.providerModel === apimartModel,
-        ) ?? this.findEnabledOrThrow("apimart-gpt-image-2")
+          (model) =>
+            model.provider === "apimart" &&
+            (model.id === normalizedApimartModelId || model.providerModel === apimartModel),
+        ) ?? this.findEnabledOrThrow("gpt-image-2")
       );
     }
 
     return this.findEnabledOrThrow("mock-image-provider");
+  }
+
+  private normalizeModelId(imageModelId: string) {
+    const normalized = imageModelId.trim();
+
+    return MODEL_ID_ALIASES[normalized] ?? normalized;
   }
 
   private assertSupportsTaskType(model: ImageModelDefinition, taskType: GenerationTaskType) {

@@ -9,6 +9,7 @@ export type ImageModelDefinition = {
   provider: ImageModelProvider;
   providerModel: string;
   enabled: boolean;
+  available: boolean;
   supportsTextToImage: boolean;
   supportsImageToImage: boolean;
   supportsMultiImage: boolean;

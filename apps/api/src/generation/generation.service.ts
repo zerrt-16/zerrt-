@@ -75,11 +75,20 @@ export class GenerationService {
   ) {}
 
   async createTask(createGenerationTaskDto: CreateGenerationTaskDto) {
-    if (
-      !createGenerationTaskDto.messageText.trim() &&
-      !createGenerationTaskDto.sourceAssetId &&
-      !createGenerationTaskDto.baseVersionId
-    ) {
+    const messageText = (
+      createGenerationTaskDto.messageText ??
+      createGenerationTaskDto.prompt ??
+      ""
+    ).trim();
+    const sourceAssetId =
+      createGenerationTaskDto.sourceAssetId ?? createGenerationTaskDto.referenceImageIds?.[0];
+    const requestedImageModelId =
+      createGenerationTaskDto.imageModelId ??
+      createGenerationTaskDto.modelId ??
+      createGenerationTaskDto.model;
+    const requestedSize = createGenerationTaskDto.size ?? createGenerationTaskDto.aspectRatio;
+
+    if (!messageText && !sourceAssetId && !createGenerationTaskDto.baseVersionId) {
       throw new BadRequestException(
         "messageText is required unless a sourceAssetId or baseVersionId is provided.",
       );
@@ -99,15 +108,15 @@ export class GenerationService {
       throw new NotFoundException(`Project ${createGenerationTaskDto.projectId} not found.`);
     }
 
-    const requestedTaskType = createGenerationTaskDto.sourceAssetId
+    const requestedTaskType = sourceAssetId
       ? GenerationTaskType.image_to_image
       : GenerationTaskType.text_to_image;
 
     let sourceAsset = null;
 
-    if (createGenerationTaskDto.sourceAssetId) {
+    if (sourceAssetId) {
       sourceAsset = await this.assetsService.findProjectAssetOrThrow(
-        createGenerationTaskDto.sourceAssetId,
+        sourceAssetId,
         createGenerationTaskDto.projectId,
       );
     }
@@ -128,20 +137,27 @@ export class GenerationService {
       }
     }
 
-    const requestedImageModelId =
-      createGenerationTaskDto.imageModelId ?? createGenerationTaskDto.modelId;
-
     const imageModelSelection = this.imageModelRegistryService.resolveForRequest({
       imageModelId: requestedImageModelId,
       taskType: requestedTaskType,
-      size: createGenerationTaskDto.size,
+      size: requestedSize,
+    });
+
+    console.log("[image-generation-request]", {
+      provider: imageModelSelection.model.provider,
+      modelId: imageModelSelection.model.id,
+      providerModel: imageModelSelection.model.providerModel,
+      projectId: createGenerationTaskDto.projectId,
+      hasPrompt: Boolean(messageText),
+      referenceImageCount: sourceAssetId ? 1 : 0,
+      aspectRatio: imageModelSelection.size,
     });
 
     await this.prisma.message.create({
       data: {
         conversationId: project.conversation.id,
         role: "user",
-        content: createGenerationTaskDto.messageText,
+        content: messageText,
         attachmentAssetId: sourceAsset?.id ?? null,
       },
     });
@@ -150,12 +166,12 @@ export class GenerationService {
       data: {
         projectId: createGenerationTaskDto.projectId,
         conversationId: project.conversation.id,
-        sourceAssetId: createGenerationTaskDto.sourceAssetId ?? null,
+        sourceAssetId: sourceAssetId ?? null,
         baseVersionId: createGenerationTaskDto.baseVersionId ?? null,
         taskType: requestedTaskType,
         status: GenerationTaskStatus.pending,
         modelName: `pending/${imageModelSelection.model.provider}/${imageModelSelection.model.providerModel}`,
-        promptText: createGenerationTaskDto.messageText,
+        promptText: messageText,
         negativePromptText: null,
         structuredPayloadJson: {},
       },

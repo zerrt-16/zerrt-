@@ -20,7 +20,8 @@ APIMART_BASE_URL=https://api.apimart.ai/v1
 APIMART_MODEL=gpt-5.5
 APIMART_IMAGE_BASE_URL=https://api.apimart.ai/v1
 APIMART_IMAGE_MODEL=gpt-image-2
-APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro
+APIMART_NANO_BANANA_PRO_MODEL=gemini-3-pro-image-preview
+APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro,mock-image-provider
 APIMART_IMAGE_SIZE=1:1
 ```
 
@@ -82,6 +83,14 @@ curl http://localhost:3000/api/health
 curl http://localhost:3000/api/image-models
 ```
 
+Expected image model IDs:
+
+```text
+gpt-image-2
+nano-banana-pro
+mock-image-provider
+```
+
 Create a project through the Next proxy:
 
 ```bash
@@ -96,6 +105,35 @@ Optional backend direct check:
 curl -X POST http://localhost:4000/api/projects \
   -H "Content-Type: application/json" \
   -d '{"title":"后端直连项目","description":"直接后端创建"}'
+```
+
+Test GPT Image 2 generation through the Next proxy. Replace the project ID first:
+
+```bash
+curl -X POST http://localhost:3000/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":"替换为项目ID","prompt":"一张高级电商产品图","modelId":"gpt-image-2","aspectRatio":"1:1"}'
+```
+
+Test Nano Banana Pro generation through the Next proxy. Replace the project ID first:
+
+```bash
+curl -X POST http://localhost:3000/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":"替换为项目ID","prompt":"一个女孩坐在草地上，看着远方的雪山，真实摄影质感","modelId":"nano-banana-pro","aspectRatio":"1:1"}'
+```
+
+Check the API logs and confirm the Nano request was mapped to the provider model:
+
+```bash
+docker compose logs --tail=200 api
+```
+
+Expected log fields:
+
+```text
+modelId: nano-banana-pro
+providerModel: gemini-3-pro-image-preview
 ```
 
 ## 5. Stale Public API Checks

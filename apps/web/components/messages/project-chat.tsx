@@ -149,7 +149,7 @@ function getModelDisplayName(model: ImageModel | null) {
     return "未选择模型";
   }
 
-  if (model.id === "apimart-gpt-image-2") {
+  if (model.id === "gpt-image-2" || model.id === "apimart-gpt-image-2") {
     return "GPT Image 2";
   }
 
@@ -168,7 +168,10 @@ export function ProjectChat({
   projectId,
 }: ProjectChatProps) {
   const defaultImageModel =
-    imageModels.find((model) => model.id === "apimart-gpt-image-2") ?? imageModels[0] ?? null;
+    imageModels.find((model) => model.id === "gpt-image-2") ??
+    imageModels.find((model) => model.id === "apimart-gpt-image-2") ??
+    imageModels[0] ??
+    null;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [messages, setMessages] = useState(initialMessages ?? []);
   const [versions, setVersions] = useState(initialVersions ?? []);
@@ -225,6 +228,7 @@ export function ProjectChat({
 
     if (!selectedModelIsCompatible) {
       const preferredModel =
+        compatibleImageModels.find((model) => model.id === "gpt-image-2") ??
         compatibleImageModels.find((model) => model.id === "apimart-gpt-image-2") ??
         compatibleImageModels[0];
       setSelectedImageModelId(preferredModel.id);
@@ -409,6 +413,12 @@ export function ProjectChat({
     try {
       setError(null);
       setIsGenerating(true);
+
+      console.log("[generate-request]", {
+        modelId: selectedImageModel.id,
+        promptLength: content.trim().length,
+        aspectRatio: selectedSize,
+      });
 
       const task = await requestApi<GenerationTask>("/generate", {
         method: "POST",

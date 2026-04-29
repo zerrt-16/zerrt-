@@ -245,7 +245,7 @@ npm.cmd run dev:web
 - `negativePromptText` should be present
 - `GET http://localhost:4000/api/projects/{projectId}/versions` should return a version whose `changeSummary` matches the APIMart-generated `editSummary`
 
-8. To verify fallback behavior, remove `APIMART_API_KEY`, restart the API, and run the same flow again. The task should still succeed with fallback prompt planning and `modelName` should show `fallback-agent/mock-image-provider`.
+8. To verify fallback behavior, remove `APIMART_API_KEY`, restart the API, and run the same flow again. The task should still succeed with fallback prompt planning and `modelName` should show the mock image provider.
 
 ## Task 6 Local Verification
 
@@ -259,7 +259,8 @@ APIMART_BASE_URL=https://api.apimart.ai/v1
 APIMART_MODEL=gpt-5.5
 APIMART_IMAGE_BASE_URL=https://api.apimart.ai/v1
 APIMART_IMAGE_MODEL=gpt-image-2
-APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro
+APIMART_NANO_BANANA_PRO_MODEL=gemini-3-pro-image-preview
+APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro,mock-image-provider
 APIMART_IMAGE_SIZE=1:1
 ```
 
@@ -301,7 +302,7 @@ The backend exposes an image model registry without requiring a Prisma migration
 
 Registered models:
 
-- `apimart-gpt-image-2`: APIMart GPT-Image-2, supports text-to-image and image-to-image
+- `gpt-image-2`: APIMart GPT-Image-2, supports text-to-image and image-to-image
 - `nano-banana-pro`: APIMart Nano Banana Pro, supports text-to-image and image-to-image
 - `mock-image-provider`: local mock provider for development testing
 
@@ -341,7 +342,7 @@ Invoke-RestMethod http://localhost:4000/api/image-models
 - Select `Mock Image Provider`
 - Click `生成图片`
 - Confirm the task succeeds without calling the real APIMart image model
-- Confirm `modelName` includes `mock-image-provider`
+- Confirm `modelName` includes `mock`
 
 6. Verify Nano Banana Pro selection.
 
@@ -349,7 +350,7 @@ Invoke-RestMethod http://localhost:4000/api/image-models
 - Enter a prompt, or upload one reference image for image-to-image
 - Click `生成图片`
 - Confirm `GET http://localhost:4000/api/tasks/{taskId}` returns `status = success`
-- Confirm `modelName` includes `apimart-image/nano-banana-pro`
+- Confirm `modelName` includes `apimart-image/gemini-3-pro-image-preview` unless `APIMART_NANO_BANANA_PRO_MODEL` is overridden
 
 7. API request shape for model selection:
 
@@ -365,7 +366,7 @@ Invoke-RestMethod http://localhost:4000/api/image-models
 }
 ```
 
-If `modelId` is omitted, the backend keeps the previous compatibility behavior and chooses the default image model from `AI_IMAGE_PROVIDER` and `APIMART_IMAGE_MODEL`. The backend still accepts the previous `imageModelId` field for compatibility.
+If `modelId` is omitted, the backend keeps the previous compatibility behavior and chooses the default image model from `AI_IMAGE_PROVIDER` and `APIMART_IMAGE_MODEL`. The backend accepts `modelId`, `imageModelId`, and `model` for compatibility. Business model IDs are mapped to provider model IDs before calling APIMart, so `nano-banana-pro` calls `APIMART_NANO_BANANA_PRO_MODEL` or `gemini-3-pro-image-preview` by default.
 
 ## Ubuntu ECS Production Deployment
 
@@ -452,7 +453,8 @@ AI_IMAGE_PROVIDER=apimart
 APIMART_API_KEY=your_real_apimart_key
 APIMART_MODEL=gpt-5.5
 APIMART_IMAGE_MODEL=gpt-image-2
-APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro
+APIMART_NANO_BANANA_PRO_MODEL=gemini-3-pro-image-preview
+APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro,mock-image-provider
 ```
 
 ### 3. Build And Start
@@ -538,7 +540,7 @@ docker volume ls
 - `docker compose ps` shows `postgres`, `api`, and `web` as running or healthy
 - `api-migrate` exits successfully
 - `GET /api/health` reports PostgreSQL connected
-- `GET /api/image-models` returns `apimart-gpt-image-2` and `mock-image-provider`
+- `GET /api/image-models` returns `gpt-image-2`, `nano-banana-pro`, and `mock-image-provider`
 - Create a project from the web UI
 - Upload a reference image
 - Generate an image with `GPT-Image-2`

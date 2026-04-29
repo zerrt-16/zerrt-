@@ -46,6 +46,7 @@ export class ApimartImageProviderService extends ImageProvider {
       projectId: input.projectId,
       prompt: input.prompt,
       negativePrompt: input.negativePrompt,
+      modelId: input.imageModel?.id,
       providerModel: input.imageModel?.providerModel,
       size: input.size ?? input.imageModel?.defaultSize,
       quality: input.quality,
@@ -61,6 +62,7 @@ export class ApimartImageProviderService extends ImageProvider {
       prompt: input.prompt,
       negativePrompt: input.negativePrompt,
       referenceImageDataUrl: sourceDataUrl,
+      modelId: input.imageModel?.id,
       providerModel: input.imageModel?.providerModel,
       size: input.size ?? input.imageModel?.defaultSize,
       quality: input.quality,
@@ -72,6 +74,7 @@ export class ApimartImageProviderService extends ImageProvider {
     prompt: string;
     negativePrompt?: string;
     referenceImageDataUrl?: string;
+    modelId?: string;
     providerModel?: string;
     size?: string;
     quality?: string;
@@ -84,11 +87,13 @@ export class ApimartImageProviderService extends ImageProvider {
 
     const endpoint = `${this.getBaseUrl()}/images/generations`;
     const startedAt = Date.now();
+    const providerModel = this.getModelName(input.providerModel);
+    const requestedImageSize = this.getImageSize(input.size);
     const payload: ImagePayload = {
-      model: this.getModelName(input.providerModel),
+      model: providerModel,
       prompt: input.prompt,
       n: 1,
-      size: this.getImageSize(input.size),
+      size: requestedImageSize,
     };
 
     if (input.negativePrompt?.trim()) {
@@ -103,7 +108,24 @@ export class ApimartImageProviderService extends ImageProvider {
       payload.image_urls = [input.referenceImageDataUrl];
     }
 
-    const responsePayload = await this.postImageGeneration(endpoint, apiKey, payload);
+    const requestContext = {
+      provider: "apimart",
+      modelId: input.modelId ?? input.providerModel ?? providerModel,
+      providerModel,
+      projectId: input.projectId,
+      hasPrompt: Boolean(input.prompt.trim()),
+      referenceImageCount: input.referenceImageDataUrl ? 1 : 0,
+      aspectRatio: requestedImageSize,
+    };
+
+    console.log("[image-generation-request]", requestContext);
+
+    const responsePayload = await this.postImageGeneration(
+      endpoint,
+      apiKey,
+      payload,
+      requestContext,
+    );
     const providerImage = await this.resolveProviderImage(responsePayload, apiKey, startedAt);
     const dimensions = imageSize(providerImage.buffer);
 
@@ -121,21 +143,49 @@ export class ApimartImageProviderService extends ImageProvider {
     };
   }
 
-  private async postImageGeneration(endpoint: string, apiKey: string, payload: ImagePayload) {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
+  private async postImageGeneration(
+    endpoint: string,
+    apiKey: string,
+    payload: ImagePayload,
+    context: {
+      provider: string;
+      modelId: string;
+      providerModel: string;
+      projectId: string;
+    },
+  ) {
+    let response: Response;
+
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      console.error("[image-generation-error]", {
+        ...context,
+        errorMessage: this.formatError(error),
+      });
+      throw error;
+    }
 
     const responseText = await response.text();
 
     if (!response.ok) {
+      const responseBody = responseText.slice(0, 500);
+
+      console.error("[image-generation-error]", {
+        ...context,
+        status: response.status,
+        responseBody,
+        errorMessage: responseBody || "Unknown APIMart image provider error.",
+      });
       this.logger.error(
-        `APIMart image provider failed. status=${response.status} message=${responseText}`,
+        `APIMart image provider failed. modelId=${context.modelId} providerModel=${context.providerModel} status=${response.status} message=${responseBody}`,
       );
       throw new Error(
         `APIMart image request failed with status ${response.status}: ${

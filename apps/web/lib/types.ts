@@ -74,6 +74,7 @@ export type ImageModel = {
   provider: "apimart" | "mock";
   providerModel: string;
   enabled: boolean;
+  available: boolean;
   supportsTextToImage: boolean;
   supportsImageToImage: boolean;
   supportsMultiImage: boolean;
