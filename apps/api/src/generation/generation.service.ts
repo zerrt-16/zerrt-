@@ -80,7 +80,7 @@ export class GenerationService {
       createGenerationTaskDto.prompt ??
       ""
     ).trim();
-    const sourceAssetId =
+    let sourceAssetId =
       createGenerationTaskDto.sourceAssetId ?? createGenerationTaskDto.referenceImageIds?.[0];
     const requestedImageModelId =
       createGenerationTaskDto.imageModelId ??
@@ -108,10 +108,6 @@ export class GenerationService {
       throw new NotFoundException(`Project ${createGenerationTaskDto.projectId} not found.`);
     }
 
-    const requestedTaskType = sourceAssetId
-      ? GenerationTaskType.image_to_image
-      : GenerationTaskType.text_to_image;
-
     let sourceAsset = null;
 
     if (sourceAssetId) {
@@ -127,7 +123,12 @@ export class GenerationService {
           id: createGenerationTaskDto.baseVersionId,
           projectId: createGenerationTaskDto.projectId,
         },
-        select: { id: true },
+        select: {
+          id: true,
+          outputAsset: {
+            select: assetSelect,
+          },
+        },
       });
 
       if (!baseVersion) {
@@ -135,7 +136,16 @@ export class GenerationService {
           `Base version ${createGenerationTaskDto.baseVersionId} not found for project ${createGenerationTaskDto.projectId}.`,
         );
       }
+
+      if (!sourceAssetId) {
+        sourceAsset = baseVersion.outputAsset;
+        sourceAssetId = baseVersion.outputAsset.id;
+      }
     }
+
+    const requestedTaskType = sourceAssetId
+      ? GenerationTaskType.image_to_image
+      : GenerationTaskType.text_to_image;
 
     const imageModelSelection = this.imageModelRegistryService.resolveForRequest({
       imageModelId: requestedImageModelId,

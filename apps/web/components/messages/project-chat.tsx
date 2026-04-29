@@ -187,7 +187,10 @@ export function ProjectChat({
 
   const hasMessages = messages.length > 0;
   const hasVersions = versions.length > 0;
-  const isImageToImage = Boolean(pendingAsset);
+  const latestVersion = versions[0] ?? null;
+  const currentVersionForIteration = currentTask?.generatedVersion ?? latestVersion;
+  const iterationSourceAsset = currentVersionForIteration?.outputAsset ?? null;
+  const isImageToImage = Boolean(pendingAsset || iterationSourceAsset);
   const compatibleImageModels = useMemo(
     () =>
       imageModels.filter((model) =>
@@ -197,10 +200,14 @@ export function ProjectChat({
   );
   const selectedImageModel =
     imageModels.find((model) => model.id === selectedImageModelId) ?? defaultImageModel;
-  const latestVersion = versions[0] ?? null;
   const latestReferenceAsset = useMemo(
-    () => (pendingAsset ? toPreviewAsset(pendingAsset) : findLatestMessageAttachment(messages)),
-    [messages, pendingAsset],
+    () =>
+      pendingAsset
+        ? toPreviewAsset(pendingAsset)
+        : iterationSourceAsset
+          ? toPreviewAsset(iterationSourceAsset)
+          : findLatestMessageAttachment(messages),
+    [messages, pendingAsset, iterationSourceAsset],
   );
   const latestOutputAsset =
     currentTask?.generatedVersion?.outputAsset ?? latestVersion?.outputAsset ?? null;
@@ -373,12 +380,15 @@ export function ProjectChat({
       return;
     }
 
-    if (!pendingAsset && !selectedImageModel.supportsTextToImage) {
+    const sourceAssetIdForGeneration = pendingAsset?.assetId ?? iterationSourceAsset?.id ?? null;
+    const baseVersionIdForGeneration = pendingAsset ? null : currentVersionForIteration?.id ?? null;
+
+    if (!sourceAssetIdForGeneration && !selectedImageModel.supportsTextToImage) {
       setError(`模型「${getModelDisplayName(selectedImageModel)}」不支持文生图。`);
       return;
     }
 
-    if (pendingAsset && !selectedImageModel.supportsImageToImage) {
+    if (sourceAssetIdForGeneration && !selectedImageModel.supportsImageToImage) {
       setError(`模型「${getModelDisplayName(selectedImageModel)}」不支持图生图。`);
       return;
     }
@@ -418,6 +428,8 @@ export function ProjectChat({
         modelId: selectedImageModel.id,
         promptLength: content.trim().length,
         aspectRatio: selectedSize,
+        sourceAssetId: sourceAssetIdForGeneration,
+        baseVersionId: baseVersionIdForGeneration,
       });
 
       const task = await requestApi<GenerationTask>("/generate", {
@@ -428,8 +440,8 @@ export function ProjectChat({
         body: JSON.stringify({
           projectId,
           messageText: content,
-          sourceAssetId: pendingAsset?.assetId ?? null,
-          baseVersionId: null,
+          sourceAssetId: sourceAssetIdForGeneration,
+          baseVersionId: baseVersionIdForGeneration,
           modelId: selectedImageModel.id,
           size: selectedSize,
         }),
