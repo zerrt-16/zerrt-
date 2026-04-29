@@ -56,6 +56,18 @@ export type GenerationTask = {
   generatedVersion: Version | null;
 };
 
+export type VersionGenerationTask = {
+  taskType: "text_to_image" | "image_to_image";
+  status: "pending" | "running" | "success" | "failed";
+  modelName: string;
+  promptText: string;
+  negativePromptText: string | null;
+  structuredPayloadJson: Record<string, unknown>;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
 export type Version = {
   id: string;
   generationTaskId: string | null;
@@ -65,6 +77,7 @@ export type Version = {
   changeSummary: string | null;
   createdAt: string;
   outputAsset: Asset;
+  generationTask?: VersionGenerationTask | null;
 };
 
 export type ImageModel = {

@@ -4,10 +4,12 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Clock3,
+  Download,
   FileText,
   History,
   ImageIcon,
   LoaderCircle,
+  Maximize2,
   MessageSquare,
   Send,
   Sparkles,
@@ -15,6 +17,8 @@ import {
   X,
 } from "lucide-react";
 
+import { ImagePreviewDialog } from "@/components/image-preview-dialog";
+import type { UpscaleTargetResolution } from "@/components/image-upscale-panel";
 import { ModelSelector } from "@/components/model-selector";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -192,6 +196,51 @@ function getGenerationFailureMessage(task: GenerationTask | null) {
   return "生成失败，请稍后重试。";
 }
 
+function getSafeTaskErrorMessage(task: GenerationTask | null, fallback: string) {
+  const message = task?.errorMessage?.trim();
+
+  if (!message || /<html|<!doctype/i.test(message)) {
+    return fallback;
+  }
+
+  return message.length > 120 ? fallback : message;
+}
+
+function getVersionStatus(version: Version) {
+  return version.generationTask?.status ?? "success";
+}
+
+function getVersionStatusLabel(version: Version) {
+  return formatTaskLabel(getVersionStatus(version));
+}
+
+function getDownloadFileName(projectId: string, version: Version) {
+  const mimeType = version.outputAsset.mimeType.toLowerCase();
+  const extension = mimeType.includes("jpeg")
+    ? "jpg"
+    : mimeType.includes("webp")
+      ? "webp"
+      : "png";
+
+  return `zerrt-ai-${projectId}-${version.id}.${extension}`;
+}
+
+function getVersionResolutionBadge(version: Version) {
+  const payload = version.generationTask?.structuredPayloadJson;
+  const generationType = payload?.generationType;
+  const targetResolution = payload?.targetResolution;
+
+  if (generationType === "upscale" && typeof targetResolution === "string") {
+    return `${targetResolution} 高清重绘`;
+  }
+
+  return null;
+}
+
+function getOriginalPrompt(version: Version, fallbackPrompt?: string) {
+  return version.generationTask?.promptText ?? fallbackPrompt ?? version.changeSummary ?? "";
+}
+
 export function ProjectChat({
   initialMessages,
   initialVersions,
@@ -218,6 +267,9 @@ export function ProjectChat({
     useState<GenerationRequestDraft | null>(null);
   const [selectedImageModelId, setSelectedImageModelId] = useState(defaultImageModel?.id ?? "");
   const [selectedSize, setSelectedSize] = useState(defaultImageModel?.defaultSize ?? "1:1");
+  const [previewVersion, setPreviewVersion] = useState<Version | null>(null);
+  const [upscalingVersionId, setUpscalingVersionId] = useState<string | null>(null);
+  const [upscaleError, setUpscaleError] = useState<string | null>(null);
 
   const hasMessages = messages.length > 0;
   const hasVersions = versions.length > 0;
@@ -245,6 +297,7 @@ export function ProjectChat({
   );
   const latestOutputAsset =
     currentTask?.generatedVersion?.outputAsset ?? latestVersion?.outputAsset ?? null;
+  const currentPreviewVersion = currentTask?.generatedVersion ?? latestVersion;
   const generationStatus = currentTask ? formatTaskLabel(currentTask.status) : "待生成";
   const statusTone = formatTaskTone(currentTask?.status);
   const currentTaskTimedOut = isTimeoutFailure(currentTask);
@@ -573,7 +626,63 @@ export function ProjectChat({
     setError(null);
   }
 
+  async function handleUpscaleVersion(
+    version: Version,
+    targetResolution: UpscaleTargetResolution,
+  ) {
+    if (!version.outputAsset?.fileUrl) {
+      setUpscaleError("未找到可放大的原图。");
+      return;
+    }
+
+    try {
+      setError(null);
+      setUpscaleError(null);
+      setIsGenerating(true);
+      setUpscalingVersionId(version.id);
+
+      const payload = {
+        projectId,
+        versionId: version.id,
+        targetResolution,
+        sourceImageUrl: version.outputAsset.fileUrl,
+        originalPrompt: getOriginalPrompt(version, currentTask?.promptText),
+        modelId: "nano-banana-pro",
+      };
+
+      console.log("[upscale-request]", {
+        projectId,
+        versionId: version.id,
+        targetResolution,
+        modelId: payload.modelId,
+        sourceImageUrlExists: Boolean(payload.sourceImageUrl),
+        promptLength: payload.originalPrompt.length,
+      });
+
+      const task = await requestApi<GenerationTask>(
+        `/projects/${projectId}/versions/${version.id}/upscale`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      setCurrentTask(task);
+    } catch (upscaleRequestError) {
+      const message = getShortError(upscaleRequestError, "高清放大失败，请稍后重试。");
+      setUpscaleError(message);
+      setError(message);
+      setIsGenerating(false);
+    } finally {
+      setUpscalingVersionId(null);
+    }
+  }
+
   return (
+    <>
     <section className="grid min-h-[calc(100vh-112px)] gap-5 lg:grid-cols-[320px_minmax(0,1fr)_400px]">
       <aside className="space-y-5">
         <div className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-sm">
@@ -617,12 +726,24 @@ export function ProjectChat({
                   <img
                     src={resolveAssetUrl(version.outputAsset.fileUrl)}
                     alt={`版本 ${version.versionIndex}`}
-                    className="aspect-[4/3] w-full rounded-xl object-cover"
+                    className="aspect-[4/3] w-full cursor-zoom-in rounded-xl object-cover"
+                    onClick={() => setPreviewVersion(version)}
                   />
                   <div className="mt-3 flex items-center justify-between gap-2">
-                    <div className="font-medium">版本 {version.versionIndex}</div>
-                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
-                      成功
+                    <div>
+                      <div className="font-medium">版本 {version.versionIndex}</div>
+                      {getVersionResolutionBadge(version) ? (
+                        <div className="mt-1 text-xs text-primary">
+                          {getVersionResolutionBadge(version)}
+                        </div>
+                      ) : null}
+                    </div>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-xs ${formatTaskTone(
+                        getVersionStatus(version),
+                      )}`}
+                    >
+                      {getVersionStatusLabel(version)}
                     </span>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -632,6 +753,42 @@ export function ProjectChat({
                   <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
                     {version.changeSummary ?? "暂无版本说明。"}
                   </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewVersion(version)}
+                      className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-white text-xs text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                    >
+                      <Maximize2 className="h-3.5 w-3.5" />
+                      预览
+                    </button>
+                    <a
+                      href={resolveAssetUrl(version.outputAsset.fileUrl)}
+                      download={getDownloadFileName(projectId, version)}
+                      className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-white text-xs text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      下载
+                    </a>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={upscalingVersionId === version.id || isGenerating}
+                      onClick={() => handleUpscaleVersion(version, "2K")}
+                      className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-primary/20 bg-primary/5 text-xs text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      2K 高清重绘
+                    </button>
+                    <button
+                      type="button"
+                      disabled={upscalingVersionId === version.id || isGenerating}
+                      onClick={() => handleUpscaleVersion(version, "4K")}
+                      className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-primary/20 bg-primary/5 text-xs text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      4K 细节增强
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -660,7 +817,8 @@ export function ProjectChat({
               <img
                 src={resolveAssetUrl(latestOutputAsset.fileUrl)}
                 alt="当前生成结果"
-                className="max-h-[700px] w-full object-contain"
+                className="max-h-[700px] w-full cursor-zoom-in object-contain"
+                onClick={() => currentPreviewVersion && setPreviewVersion(currentPreviewVersion)}
               />
             ) : (
               <div className="flex max-w-sm flex-col items-center gap-3 text-center text-muted-foreground">
@@ -714,10 +872,47 @@ export function ProjectChat({
 
             {currentTask?.status === "failed" && !currentTaskTimedOut ? (
               <div className="absolute bottom-4 left-4 right-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                生成失败，请稍后重试。
+                {getSafeTaskErrorMessage(currentTask, "生成失败，请稍后重试。")}
               </div>
             ) : null}
           </div>
+
+          {currentPreviewVersion ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPreviewVersion(currentPreviewVersion)}
+              >
+                <Maximize2 className="h-4 w-4" />
+                预览大图
+              </Button>
+              <a
+                href={resolveAssetUrl(currentPreviewVersion.outputAsset.fileUrl)}
+                download={getDownloadFileName(projectId, currentPreviewVersion)}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-input bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-secondary hover:text-secondary-foreground"
+              >
+                <Download className="h-4 w-4" />
+                下载原图
+              </a>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isGenerating}
+                onClick={() => handleUpscaleVersion(currentPreviewVersion, "2K")}
+              >
+                2K 高清重绘
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isGenerating}
+                onClick={() => handleUpscaleVersion(currentPreviewVersion, "4K")}
+              >
+                4K 细节增强
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         <div className="grid gap-5 xl:grid-cols-2">
@@ -959,7 +1154,7 @@ export function ProjectChat({
               ) : null}
               {currentTask.status === "failed" && !currentTaskTimedOut ? (
                 <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-red-700">
-                  失败原因：生成失败，请稍后重试。
+                  失败原因：{getSafeTaskErrorMessage(currentTask, "生成失败，请稍后重试。")}
                 </div>
               ) : null}
               <details className="rounded-2xl border border-border bg-background/70 p-3">
@@ -994,5 +1189,16 @@ export function ProjectChat({
         </div>
       </aside>
     </section>
+    {previewVersion ? (
+      <ImagePreviewDialog
+        projectId={projectId}
+        version={previewVersion}
+        isUpscaling={upscalingVersionId === previewVersion.id || isGenerating}
+        upscaleError={upscaleError}
+        onClose={() => setPreviewVersion(null)}
+        onUpscale={(targetResolution) => handleUpscaleVersion(previewVersion, targetResolution)}
+      />
+    ) : null}
+    </>
   );
 }

@@ -26,5 +26,6 @@ import { ImageProvider } from "./providers/image-provider";
       useExisting: ConfiguredImageProviderService,
     },
   ],
+  exports: [ImageModelRegistryService, ImageProvider],
 })
 export class GenerationModule {}

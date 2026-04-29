@@ -545,7 +545,38 @@ docker volume ls
 - Create a project from the web UI
 - Upload a reference image
 - Generate an image with `GPT-Image-2`
+- Click a generated image to open the large preview dialog
+- Download the original generated image from the preview dialog or version card
+- Run 2K / 4K AI high-resolution redraw from an existing version
 - Confirm generated files remain after `docker compose restart api`
+
+### 6.1 Image Preview, Download, And AI High-Resolution Redraw
+
+Generated versions are stored as local output assets under `/uploads/projects/{projectId}/outputs/`, so the web app can preview and download them through the same Next.js `/uploads` rewrite.
+
+The 2K / 4K flow is not a traditional super-resolution algorithm. It creates a new image version through an AI redraw workflow:
+
+1. GPT-5.5 analyzes the source image and extracts the subject, pose, scene, composition, lighting, materials, background, style keywords, locked details, and forbidden changes.
+2. Nano Banana Pro receives the analysis, original prompt, target resolution, and source image to redraw a higher-definition version while preserving composition and identity.
+3. The result is saved as a new output `Asset` and a new `ImageVersion` with `parentVersionId` pointing to the source version.
+
+No Prisma migration is required for this MVP. Upscale metadata such as `generationType`, `targetResolution`, `analysisPrompt`, `finalPrompt`, `modelId`, and `providerModel` is stored in `GenerationTask.structuredPayloadJson`.
+
+API checks:
+
+```bash
+curl http://localhost:3000/api/projects/替换项目ID/versions
+
+curl -X POST http://localhost:3000/api/projects/替换项目ID/versions/替换版本ID/upscale \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":"替换项目ID","versionId":"替换版本ID","targetResolution":"2K","modelId":"nano-banana-pro"}'
+
+curl -X POST http://localhost:3000/api/projects/替换项目ID/versions/替换版本ID/upscale \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":"替换项目ID","versionId":"替换版本ID","targetResolution":"4K","modelId":"nano-banana-pro"}'
+```
+
+If GPT-5.5 image analysis fails, the UI shows `图片分析失败，请稍后重试。`. If Nano Banana Pro redraw fails, the UI shows `高清放大失败，请稍后重试。`. In mock mode, the flow is marked as test mode and does not claim real 2K / 4K output.
 
 ### 7. Future Domain And HTTPS
 

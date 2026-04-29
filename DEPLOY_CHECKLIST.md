@@ -124,6 +124,28 @@ curl -X POST http://localhost:3000/api/generate \
   -d '{"projectId":"替换为项目ID","prompt":"一个女孩坐在草地上，看着远方的雪山，真实摄影质感","modelId":"nano-banana-pro","aspectRatio":"1:1"}'
 ```
 
+Check project versions after generation. Replace the project ID first:
+
+```bash
+curl http://localhost:3000/api/projects/替换项目ID/versions
+```
+
+Test 2K AI high-resolution redraw. Replace the project and version IDs first:
+
+```bash
+curl -X POST http://localhost:3000/api/projects/替换项目ID/versions/替换版本ID/upscale \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":"替换项目ID","versionId":"替换版本ID","targetResolution":"2K","modelId":"nano-banana-pro"}'
+```
+
+Test 4K AI high-resolution redraw. Replace the project and version IDs first:
+
+```bash
+curl -X POST http://localhost:3000/api/projects/替换项目ID/versions/替换版本ID/upscale \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":"替换项目ID","versionId":"替换版本ID","targetResolution":"4K","modelId":"nano-banana-pro"}'
+```
+
 Check the API logs and confirm the Nano request was mapped to the provider model:
 
 ```bash
@@ -188,7 +210,12 @@ http://8.163.38.177:4000/api/api/projects
 }
 ```
 
-9. If a request fails, the UI should only show a short Chinese message such as:
+9. Click a generated image or `预览大图`; confirm the preview dialog opens.
+10. Click `下载原图`; confirm the file downloads as `zerrt-ai-{projectId}-{versionId}.png` or the matching source extension.
+11. Click `2K 高清重绘` or `4K 细节增强`; confirm a new task is created and the UI shows loading.
+12. After success, confirm the new upscale version appears in the version list and can be previewed/downloaded.
+13. If the provider is unavailable, the UI should show `图片分析失败，请稍后重试。` or `高清放大失败，请稍后重试。`.
+14. If a request fails, the UI should only show a short Chinese message such as:
 
 ```text
 请求失败，状态码 404。

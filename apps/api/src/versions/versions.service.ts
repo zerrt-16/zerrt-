@@ -32,6 +32,19 @@ export class VersionsService {
         versionIndex: true,
         changeSummary: true,
         createdAt: true,
+        generationTask: {
+          select: {
+            taskType: true,
+            status: true,
+            modelName: true,
+            promptText: true,
+            negativePromptText: true,
+            structuredPayloadJson: true,
+            errorMessage: true,
+            createdAt: true,
+            completedAt: true,
+          },
+        },
         outputAsset: {
           select: assetSelect,
         },
