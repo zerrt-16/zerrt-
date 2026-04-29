@@ -46,8 +46,18 @@ type PreviewAsset = {
   sizeBytes: number;
 };
 
+type GenerationRequestDraft = {
+  projectId: string;
+  messageText: string;
+  sourceAssetId: string | null;
+  baseVersionId: string | null;
+  modelId: string;
+  size: string;
+};
+
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const SUPPORTED_FILE_TYPES = new Set(["image/png", "image/jpg", "image/jpeg", "image/webp"]);
+const IMAGE_GENERATION_TIMEOUT_SECONDS = 300;
 
 function formatDateTime(value: string) {
   const date = new Date(value);
@@ -160,6 +170,28 @@ function getShortError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function isTimeoutFailure(task: GenerationTask | null) {
+  if (task?.status !== "failed") {
+    return false;
+  }
+
+  const errorMessage = task.errorMessage?.toLowerCase() ?? "";
+
+  return (
+    errorMessage.includes("timed out") ||
+    errorMessage.includes("timeout") ||
+    errorMessage.includes("超时")
+  );
+}
+
+function getGenerationFailureMessage(task: GenerationTask | null) {
+  if (isTimeoutFailure(task)) {
+    return `生成超时：当前模型超过 ${IMAGE_GENERATION_TIMEOUT_SECONDS} 秒仍未返回结果。`;
+  }
+
+  return "生成失败，请稍后重试。";
+}
+
 export function ProjectChat({
   initialMessages,
   initialVersions,
@@ -182,6 +214,8 @@ export function ProjectChat({
   const [isGenerating, setIsGenerating] = useState(false);
   const [pendingAsset, setPendingAsset] = useState<UploadedAsset | null>(null);
   const [currentTask, setCurrentTask] = useState<GenerationTask | null>(null);
+  const [lastGenerationRequest, setLastGenerationRequest] =
+    useState<GenerationRequestDraft | null>(null);
   const [selectedImageModelId, setSelectedImageModelId] = useState(defaultImageModel?.id ?? "");
   const [selectedSize, setSelectedSize] = useState(defaultImageModel?.defaultSize ?? "1:1");
 
@@ -213,6 +247,7 @@ export function ProjectChat({
     currentTask?.generatedVersion?.outputAsset ?? latestVersion?.outputAsset ?? null;
   const generationStatus = currentTask ? formatTaskLabel(currentTask.status) : "待生成";
   const statusTone = formatTaskTone(currentTask?.status);
+  const currentTaskTimedOut = isTimeoutFailure(currentTask);
 
   useEffect(() => {
     if (!selectedImageModel) {
@@ -424,6 +459,16 @@ export function ProjectChat({
       setError(null);
       setIsGenerating(true);
 
+      const generationRequest: GenerationRequestDraft = {
+        projectId,
+        messageText: content,
+        sourceAssetId: sourceAssetIdForGeneration,
+        baseVersionId: baseVersionIdForGeneration,
+        modelId: selectedImageModel.id,
+        size: selectedSize,
+      };
+      setLastGenerationRequest(generationRequest);
+
       console.log("[generate-request]", {
         modelId: selectedImageModel.id,
         promptLength: content.trim().length,
@@ -438,12 +483,7 @@ export function ProjectChat({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          projectId,
-          messageText: content,
-          sourceAssetId: sourceAssetIdForGeneration,
-          baseVersionId: baseVersionIdForGeneration,
-          modelId: selectedImageModel.id,
-          size: selectedSize,
+          ...generationRequest,
         }),
       });
       setCurrentTask(task);
@@ -454,6 +494,83 @@ export function ProjectChat({
       setError(getShortError(generationError, "生成失败，请稍后重试。"));
       setIsGenerating(false);
     }
+  }
+
+  async function handleRetryGeneration() {
+    const retryRequest =
+      lastGenerationRequest ??
+      (currentTask
+        ? {
+            projectId,
+            messageText: currentTask.promptText,
+            sourceAssetId: currentTask.sourceAssetId,
+            baseVersionId: currentTask.baseVersionId,
+            modelId: selectedImageModel?.id ?? "gpt-image-2",
+            size: selectedSize,
+          }
+        : null);
+
+    if (!retryRequest) {
+      setError("未找到可重新生成的任务参数，请重新输入创作指令。");
+      return;
+    }
+
+    const nextRequest: GenerationRequestDraft = {
+      ...retryRequest,
+      modelId: selectedImageModel?.id ?? retryRequest.modelId,
+      size: selectedSize || retryRequest.size,
+    };
+
+    try {
+      setError(null);
+      setIsGenerating(true);
+      setLastGenerationRequest(nextRequest);
+
+      console.log("[generate-retry-request]", {
+        modelId: nextRequest.modelId,
+        promptLength: nextRequest.messageText.trim().length,
+        aspectRatio: nextRequest.size,
+        sourceAssetId: nextRequest.sourceAssetId,
+        baseVersionId: nextRequest.baseVersionId,
+      });
+
+      const task = await requestApi<GenerationTask>("/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(nextRequest),
+      });
+
+      setCurrentTask(task);
+    } catch (retryError) {
+      setError(getShortError(retryError, "重新生成失败，请稍后重试。"));
+      setIsGenerating(false);
+    }
+  }
+
+  function handleSwitchModelAfterTimeout() {
+    const alternativeModel =
+      compatibleImageModels.find(
+        (model) => model.id !== selectedImageModelId && model.id === "gpt-image-2",
+      ) ??
+      compatibleImageModels.find((model) => model.id !== selectedImageModelId) ??
+      null;
+
+    if (!alternativeModel) {
+      setError("暂无其他可切换模型，请稍后重试或取消本次生成。");
+      return;
+    }
+
+    setSelectedImageModelId(alternativeModel.id);
+    setSelectedSize(alternativeModel.defaultSize);
+    setError(`已切换到 ${getModelDisplayName(alternativeModel)}，可以点击「重新生成」。`);
+  }
+
+  function handleCancelTimedOutTask() {
+    setCurrentTask(null);
+    setIsGenerating(false);
+    setError(null);
   }
 
   return (
@@ -566,7 +683,36 @@ export function ProjectChat({
               </div>
             ) : null}
 
-            {currentTask?.status === "failed" ? (
+            {currentTaskTimedOut ? (
+              <div className="absolute bottom-20 left-4 right-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 shadow-sm">
+                <div>{getGenerationFailureMessage(currentTask)}</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRetryGeneration}
+                    className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"
+                  >
+                    重新生成
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSwitchModelAfterTimeout}
+                    className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                  >
+                    切换模型
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelTimedOutTask}
+                    className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                  >
+                    取消生成
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {currentTask?.status === "failed" && !currentTaskTimedOut ? (
               <div className="absolute bottom-4 left-4 right-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                 生成失败，请稍后重试。
               </div>
@@ -775,7 +921,43 @@ export function ProjectChat({
                 <div>任务类型：{currentTask.taskType}</div>
                 <div>模型：{currentTask.modelName}</div>
               </div>
-              {currentTask.status === "failed" ? (
+              {currentTaskTimedOut ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                  <div className="font-medium">{getGenerationFailureMessage(currentTask)}</div>
+                  <p className="mt-1 text-xs leading-5">
+                    你可以重新排队生成、切换到其他模型，或取消本次超时状态。
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleRetryGeneration}
+                      disabled={isGenerating}
+                    >
+                      重新生成
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleSwitchModelAfterTimeout}
+                      disabled={isGenerating}
+                    >
+                      切换模型
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={handleCancelTimedOutTask}
+                      disabled={isGenerating}
+                    >
+                      取消生成
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {currentTask.status === "failed" && !currentTaskTimedOut ? (
                 <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-red-700">
                   失败原因：生成失败，请稍后重试。
                 </div>

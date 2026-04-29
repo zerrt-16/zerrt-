@@ -23,7 +23,7 @@ type ProviderImage = {
 
 const DEFAULT_APIMART_IMAGE_BASE_URL = "https://api.apimart.ai/v1";
 const DEFAULT_IMAGE_SIZE = "1:1";
-const IMAGE_TIMEOUT_MS = 90_000;
+const DEFAULT_IMAGE_TIMEOUT_MS = 300_000;
 const INITIAL_POLL_DELAY_MS = 15_000;
 const POLL_INTERVAL_MS = 3_000;
 const MAX_DOWNLOAD_REDIRECTS = 5;
@@ -126,7 +126,12 @@ export class ApimartImageProviderService extends ImageProvider {
       payload,
       requestContext,
     );
-    const providerImage = await this.resolveProviderImage(responsePayload, apiKey, startedAt);
+    const providerImage = await this.resolveProviderImage(
+      responsePayload,
+      apiKey,
+      startedAt,
+      this.getImageTimeoutMs(),
+    );
     const dimensions = imageSize(providerImage.buffer);
 
     if (!dimensions.width || !dimensions.height) {
@@ -207,6 +212,7 @@ export class ApimartImageProviderService extends ImageProvider {
     payload: unknown,
     apiKey: string,
     startedAt: number,
+    timeoutMs: number,
   ): Promise<ProviderImage> {
     const directImage = this.extractImageFromPayload(payload);
 
@@ -222,14 +228,14 @@ export class ApimartImageProviderService extends ImageProvider {
 
     this.logger.log(`APIMart image task id parsed: ${taskId}`);
 
-    return this.pollTask(taskId, apiKey, startedAt);
+    return this.pollTask(taskId, apiKey, startedAt, timeoutMs);
   }
 
-  private async pollTask(taskId: string, apiKey: string, startedAt: number) {
+  private async pollTask(taskId: string, apiKey: string, startedAt: number, timeoutMs: number) {
     const taskEndpoint = `${this.getBaseUrl()}/tasks/${encodeURIComponent(taskId)}`;
     let nextDelayMs = INITIAL_POLL_DELAY_MS;
 
-    while (Date.now() - startedAt < IMAGE_TIMEOUT_MS) {
+    while (Date.now() - startedAt < timeoutMs) {
       await this.delay(nextDelayMs);
       nextDelayMs = POLL_INTERVAL_MS;
 
@@ -294,7 +300,7 @@ export class ApimartImageProviderService extends ImageProvider {
       }
     }
 
-    throw new Error(`APIMart image task timed out after ${IMAGE_TIMEOUT_MS / 1000} seconds.`);
+    throw new Error(`APIMart image task timed out after ${timeoutMs / 1000} seconds.`);
   }
 
   private async materializeProviderImage(image: {
@@ -710,6 +716,16 @@ export class ApimartImageProviderService extends ImageProvider {
 
   private getImageSize(size?: string) {
     return size?.trim() || this.configService.get<string>("APIMART_IMAGE_SIZE")?.trim() || DEFAULT_IMAGE_SIZE;
+  }
+
+  private getImageTimeoutMs() {
+    const timeoutSeconds = Number(
+      this.configService.get<string>("APIMART_IMAGE_TIMEOUT_SECONDS")?.trim(),
+    );
+
+    return Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
+      ? timeoutSeconds * 1000
+      : DEFAULT_IMAGE_TIMEOUT_MS;
   }
 
   private extensionFromMimeType(mimeType: string) {
