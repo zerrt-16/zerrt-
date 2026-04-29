@@ -1,15 +1,8 @@
 # Deployment Checklist
 
-This checklist verifies the production request chain on Ubuntu ECS:
-
-- Browser requests same-origin `/api/...` on the web service.
-- Next.js rewrites `/api/:path*` to `http://api:4000/api/:path*` inside Docker.
-- Next.js server rendering uses `API_SERVER_BASE_URL=http://api:4000`.
-- NestJS keeps the real global route prefix `/api`.
+This checklist verifies the stable production request chain and the ZERRT·Ai UI after deployment.
 
 ## 1. Required Environment
-
-For current public IP testing:
 
 ```env
 WEB_PORT=3000
@@ -19,7 +12,7 @@ API_SERVER_BASE_URL=http://api:4000
 CORS_ORIGIN=http://8.163.38.177:3000
 ```
 
-APIMart values must be configured in `.env` without committing real keys:
+APIMart values must stay server-side only:
 
 ```env
 APIMART_API_KEY=your_real_key
@@ -31,7 +24,7 @@ APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro
 APIMART_IMAGE_SIZE=1:1
 ```
 
-## 2. Rebuild After Pulling Code
+## 2. Rebuild
 
 ```bash
 git pull
@@ -39,25 +32,18 @@ docker compose down
 docker compose up -d --build
 ```
 
-If only the web image needs to be rebuilt:
+If only the web image changed:
 
 ```bash
-docker compose build web
+docker compose build --no-cache web
 docker compose up -d web
 ```
 
-## 3. Required Command Verification
-
-Docker container status:
+## 3. Container And Environment Checks
 
 ```bash
 docker ps
 docker compose ps
-```
-
-Check the running web container environment:
-
-```bash
 docker compose exec web env | grep -E "NEXT_PUBLIC_API_BASE_URL|API_SERVER_BASE_URL"
 ```
 
@@ -68,61 +54,43 @@ NEXT_PUBLIC_API_BASE_URL=/api
 API_SERVER_BASE_URL=http://api:4000
 ```
 
-Check that the built frontend bundle does not contain the old public API host:
+## 4. API Proxy Checks
 
-```bash
-docker compose exec web sh -lc "grep -R '8.163.38.177:4000' -n /app/apps/web/.next/static /app/apps/web/.next/server || true"
-```
-
-Expected: no output.
-
-Check that the built frontend bundle does not contain the wrong backend path:
-
-```bash
-docker compose exec web sh -lc "grep -R '4000/projects' -n /app/apps/web/.next/static /app/apps/web/.next/server || true"
-```
-
-Expected: no output.
-
-API container health check:
+API container health:
 
 ```bash
 docker compose exec api wget -qO- http://localhost:4000/api/health
 ```
 
-Web container can reach the API service through Docker DNS:
+Web container can reach API through Docker DNS:
 
 ```bash
 docker compose exec web wget -qO- http://api:4000/api/health
-```
-
-Web container can read the project list through Docker DNS:
-
-```bash
 docker compose exec web wget -qO- http://api:4000/api/projects
 ```
 
-Web container validates the Next.js rewrite path:
+Next rewrite health from the web container:
 
 ```bash
 docker compose exec web wget -qO- http://localhost:3000/api/health
 ```
 
-ECS host validates the public same-origin Next API proxy:
+Host checks through the same-origin Next proxy:
 
 ```bash
 curl http://localhost:3000/api/health
+curl http://localhost:3000/api/image-models
 ```
 
-ECS host creates a project through the Next proxy:
+Create a project through the Next proxy:
 
 ```bash
 curl -X POST http://localhost:3000/api/projects \
   -H "Content-Type: application/json" \
-  -d '{"title":"代理最终验收","description":"确认浏览器同源代理"}'
+  -d '{"title":"UI验收项目","description":"ZERRT·Ai 品牌 UI 验收"}'
 ```
 
-ECS host creates a project by directly calling the backend:
+Optional backend direct check:
 
 ```bash
 curl -X POST http://localhost:4000/api/projects \
@@ -130,73 +98,66 @@ curl -X POST http://localhost:4000/api/projects \
   -d '{"title":"后端直连项目","description":"直接后端创建"}'
 ```
 
-Expected project response:
+## 5. Stale Public API Checks
 
-```json
-{
-  "id": "...",
-  "title": "...",
-  "description": "...",
-  "createdAt": "...",
-  "updatedAt": "..."
-}
+The built frontend bundle must not contain the old public API host:
+
+```bash
+docker compose exec web sh -lc "grep -R '8.163.38.177:4000' -n /app/apps/web/.next/static /app/apps/web/.next/server || true"
 ```
 
-## 4. Browser Verification
+Expected: no output.
+
+The built frontend bundle must not contain the wrong backend path:
+
+```bash
+docker compose exec web sh -lc "grep -R '4000/projects' -n /app/apps/web/.next/static /app/apps/web/.next/server || true"
+```
+
+Expected: no output.
+
+## 6. Browser Validation
 
 1. Open `http://8.163.38.177:3000`.
-2. Open DevTools Network.
+2. Confirm the top header shows `ZERRT·Ai`.
 3. Create a project from the homepage.
-4. Confirm the browser request URL is:
+4. In Network, confirm the request URL is:
 
 ```text
 http://8.163.38.177:3000/api/projects
 ```
 
-5. Confirm the request body is:
-
-```json
-{
-  "title": "项目名称输入值",
-  "description": "项目说明输入值"
-}
-```
-
-6. Confirm these incorrect URLs never appear:
+5. Confirm these incorrect URLs never appear:
 
 ```text
-http://8.163.38.177:3000/http://8.163.38.177:4000/api/projects
 http://8.163.38.177:4000/projects
+http://8.163.38.177:3000/http://...
 http://8.163.38.177:4000/api/api/projects
 ```
 
-7. If a request fails, the UI should show only a short Chinese message such as:
+6. Open a project workspace.
+7. Confirm the model selector shows:
+
+- `GPT Image 2`
+- `Nano Banana Pro`
+
+8. Select `Nano Banana Pro`, click `开始生成`, and confirm the request body contains:
+
+```json
+{
+  "modelId": "nano-banana-pro"
+}
+```
+
+9. If a request fails, the UI should only show a short Chinese message such as:
 
 ```text
 请求失败，状态码 404。
 ```
 
-8. The browser Console may show `[api-request-error]` with:
+The browser Console may show `[api-request-error]` with `url`, `method`, `status`, and `responseBody` truncated to 500 characters.
 
-- `url`
-- `method`
-- `status`
-- `responseBody` truncated to 500 characters
-- fetch error cause when available
-
-## 5. Upload And Generation Smoke Test
-
-1. Open a project workspace.
-2. Confirm `GET /api/image-models` returns `apimart-gpt-image-2`, `nano-banana-pro`, and `mock-image-provider`.
-3. Upload one png/jpg/jpeg/webp image under 10MB.
-4. Enter a prompt.
-5. Select `GPT-Image-2`.
-6. Click `生成图片`.
-7. Confirm `GET /api/tasks/{taskId}` eventually returns `status = success`.
-8. Confirm the new version image URL starts with `/uploads/projects/.../outputs/...`.
-9. Refresh the page and confirm the version remains visible.
-
-## 6. Persistence Checks
+## 7. Persistence Checks
 
 Restart API only:
 
@@ -209,9 +170,7 @@ Expected:
 - Existing projects remain in PostgreSQL because `postgres_data` is a Docker volume.
 - Uploaded/generated images remain visible because `api_uploads` is a Docker volume.
 
-## 7. Future Nginx / Domain Mode
-
-When using a domain and HTTPS:
+## 8. Future Domain / HTTPS Mode
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=/api
@@ -219,10 +178,4 @@ API_SERVER_BASE_URL=http://api:4000
 CORS_ORIGIN=https://your-domain.com
 ```
 
-The reverse proxy should route:
-
-- `/` to `web:3000`
-- `/api` to `web:3000` if you keep Next rewrites as the proxy layer
-- `/uploads` to `web:3000` if you keep Next rewrites as the proxy layer
-
-After same-origin proxy mode is confirmed, the ECS security group can close public port `4000`. Keep only `3000` while testing by IP, or later expose only `80/443` through Nginx.
+Keep browser traffic same-origin through `/api`. After this works, public port `4000` can be closed in the ECS security group.

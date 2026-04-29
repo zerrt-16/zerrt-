@@ -7,7 +7,6 @@ import {
   FileText,
   History,
   ImageIcon,
-  ImagePlus,
   LoaderCircle,
   MessageSquare,
   Send,

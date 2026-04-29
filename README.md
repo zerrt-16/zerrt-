@@ -1,6 +1,6 @@
-# AI Creator Agent Monorepo
+# ZERRT·Ai Monorepo
 
-Full-stack monorepo starter for an AI creator agent website.
+Full-stack monorepo for the ZERRT·Ai internal AI image creation workspace.
 
 - Frontend: Next.js + TypeScript + Tailwind CSS + shadcn/ui
 - Backend: NestJS + TypeScript
