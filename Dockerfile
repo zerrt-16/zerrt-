@@ -55,7 +55,7 @@ CMD ["node", "dist/main.js"]
 
 FROM source AS web-build
 
-ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
+ARG NEXT_PUBLIC_API_BASE_URL=/api
 ARG API_SERVER_BASE_URL=http://api:4000
 
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}

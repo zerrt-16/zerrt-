@@ -54,6 +54,35 @@ docker ps
 docker compose ps
 ```
 
+Check the running web container environment:
+
+```bash
+docker compose exec web env | grep -E "NEXT_PUBLIC_API_BASE_URL|API_SERVER_BASE_URL"
+```
+
+Expected:
+
+```text
+NEXT_PUBLIC_API_BASE_URL=/api
+API_SERVER_BASE_URL=http://api:4000
+```
+
+Check that the built frontend bundle does not contain the old public API host:
+
+```bash
+docker compose exec web sh -lc "grep -R '8.163.38.177:4000' -n /app/apps/web/.next/static /app/apps/web/.next/server || true"
+```
+
+Expected: no output.
+
+Check that the built frontend bundle does not contain the wrong backend path:
+
+```bash
+docker compose exec web sh -lc "grep -R '4000/projects' -n /app/apps/web/.next/static /app/apps/web/.next/server || true"
+```
+
+Expected: no output.
+
 API container health check:
 
 ```bash
@@ -89,7 +118,7 @@ ECS host creates a project through the Next proxy:
 ```bash
 curl -X POST http://localhost:3000/api/projects \
   -H "Content-Type: application/json" \
-  -d '{"title":"代理验收项目","description":"通过 Next rewrite 创建"}'
+  -d '{"title":"代理最终验收","description":"确认浏览器同源代理"}'
 ```
 
 ECS host creates a project by directly calling the backend:

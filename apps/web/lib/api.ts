@@ -30,15 +30,7 @@ export function normalizeApiPath(path: string) {
 }
 
 export function getClientApiBaseUrl() {
-  const browserBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-
-  if (!browserBaseUrl || /^https?:\/\//i.test(browserBaseUrl)) {
-    return DEFAULT_BROWSER_API_BASE_URL;
-  }
-
-  const normalizedBaseUrl = removeTrailingSlash(browserBaseUrl);
-
-  return normalizedBaseUrl.startsWith("/") ? normalizedBaseUrl : `/${normalizedBaseUrl}`;
+  return DEFAULT_BROWSER_API_BASE_URL;
 }
 
 export function getServerApiBaseUrl() {
@@ -68,25 +60,7 @@ export function getApiUrl(path: string) {
   return joinApiUrl(getApiBaseUrl(), path);
 }
 
-function parseApiErrorMessage(status: number, responseBody: string) {
-  if (!responseBody.trim()) {
-    return `请求失败，状态码 ${status}。`;
-  }
-
-  try {
-    const payload = JSON.parse(responseBody) as { message?: string | string[] };
-
-    if (Array.isArray(payload.message)) {
-      return payload.message.join(", ");
-    }
-
-    if (typeof payload.message === "string" && payload.message.trim()) {
-      return payload.message;
-    }
-  } catch {
-    return `请求失败，状态码 ${status}。`;
-  }
-
+function parseApiErrorMessage(status: number, _responseBody: string) {
   return `请求失败，状态码 ${status}。`;
 }
 
@@ -137,6 +111,8 @@ export async function requestApi<T>(path: string, init?: RequestInit): Promise<T
   const method = init?.method ?? "GET";
 
   let response: Response;
+
+  console.log("[api-request]", { url, method });
 
   try {
     response = await fetch(url, init);
