@@ -4,6 +4,7 @@ export type ImageModelLevel = "low" | "medium" | "high";
 
 export type ImageModelDefinition = {
   id: string;
+  name: string;
   displayName: string;
   provider: ImageModelProvider;
   providerModel: string;

@@ -259,6 +259,7 @@ APIMART_BASE_URL=https://api.apimart.ai/v1
 APIMART_MODEL=gpt-5.5
 APIMART_IMAGE_BASE_URL=https://api.apimart.ai/v1
 APIMART_IMAGE_MODEL=gpt-image-2
+APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro
 APIMART_IMAGE_SIZE=1:1
 ```
 
@@ -301,6 +302,7 @@ The backend exposes an image model registry without requiring a Prisma migration
 Registered models:
 
 - `apimart-gpt-image-2`: APIMart GPT-Image-2, supports text-to-image and image-to-image
+- `nano-banana-pro`: APIMart Nano Banana Pro, supports text-to-image and image-to-image
 - `mock-image-provider`: local mock provider for development testing
 
 1. Start the backend and verify the registry API.
@@ -341,7 +343,15 @@ Invoke-RestMethod http://localhost:4000/api/image-models
 - Confirm the task succeeds without calling the real APIMart image model
 - Confirm `modelName` includes `mock-image-provider`
 
-6. API request shape for model selection:
+6. Verify Nano Banana Pro selection.
+
+- Select `Nano Banana Pro`
+- Enter a prompt, or upload one reference image for image-to-image
+- Click `生成图片`
+- Confirm `GET http://localhost:4000/api/tasks/{taskId}` returns `status = success`
+- Confirm `modelName` includes `apimart-image/nano-banana-pro`
+
+7. API request shape for model selection:
 
 ```json
 {
@@ -349,13 +359,13 @@ Invoke-RestMethod http://localhost:4000/api/image-models
   "messageText": "生成一张电商产品主图",
   "sourceAssetId": null,
   "baseVersionId": null,
-  "imageModelId": "apimart-gpt-image-2",
+  "modelId": "nano-banana-pro",
   "size": "1:1",
   "quality": "standard"
 }
 ```
 
-If `imageModelId` is omitted, the backend keeps the previous compatibility behavior and chooses the default image model from `AI_IMAGE_PROVIDER` and `APIMART_IMAGE_MODEL`.
+If `modelId` is omitted, the backend keeps the previous compatibility behavior and chooses the default image model from `AI_IMAGE_PROVIDER` and `APIMART_IMAGE_MODEL`. The backend still accepts the previous `imageModelId` field for compatibility.
 
 ## Ubuntu ECS Production Deployment
 
@@ -442,6 +452,7 @@ AI_IMAGE_PROVIDER=apimart
 APIMART_API_KEY=your_real_apimart_key
 APIMART_MODEL=gpt-5.5
 APIMART_IMAGE_MODEL=gpt-image-2
+APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro
 ```
 
 ### 3. Build And Start

@@ -45,7 +45,7 @@ export function CreateProjectForm() {
       router.refresh();
     } catch (submitError) {
       const message =
-        submitError instanceof Error ? submitError.message : "创建项目失败，请稍后再试。";
+        submitError instanceof Error ? submitError.message : "创建项目失败，请稍后重试。";
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -53,7 +53,7 @@ export function CreateProjectForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5">
       <div className="space-y-2">
         <label htmlFor="project-title" className="text-sm font-medium">
           项目名称
@@ -64,6 +64,7 @@ export function CreateProjectForm() {
           onChange={(event) => setTitle(event.target.value)}
           placeholder="例如：春季新品视觉"
           maxLength={120}
+          className="h-11"
         />
       </div>
 
@@ -77,12 +78,17 @@ export function CreateProjectForm() {
           onChange={(event) => setDescription(event.target.value)}
           placeholder="记录项目目标、风格方向或参考要求。"
           maxLength={2000}
+          className="min-h-[120px]"
         />
       </div>
 
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
 
-      <Button type="submit" className="w-full" disabled={isSubmitting}>
+      <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
         {isSubmitting ? "创建中..." : "创建项目"}
       </Button>
     </form>

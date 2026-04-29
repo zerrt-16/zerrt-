@@ -128,8 +128,11 @@ export class GenerationService {
       }
     }
 
+    const requestedImageModelId =
+      createGenerationTaskDto.imageModelId ?? createGenerationTaskDto.modelId;
+
     const imageModelSelection = this.imageModelRegistryService.resolveForRequest({
-      imageModelId: createGenerationTaskDto.imageModelId,
+      imageModelId: requestedImageModelId,
       taskType: requestedTaskType,
       size: createGenerationTaskDto.size,
     });

@@ -69,6 +69,7 @@ export type Version = {
 
 export type ImageModel = {
   id: string;
+  name: string;
   displayName: string;
   provider: "apimart" | "mock";
   providerModel: string;

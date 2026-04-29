@@ -68,6 +68,19 @@ export class CreateGenerationTaskDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(191)
+  modelId?: string;
+
+  @Transform(({ value }) => {
+    if (typeof value !== "string") {
+      return value;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  })
+  @IsOptional()
+  @IsString()
   @MaxLength(32)
   size?: string;
 

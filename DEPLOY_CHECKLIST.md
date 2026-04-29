@@ -27,6 +27,7 @@ APIMART_BASE_URL=https://api.apimart.ai/v1
 APIMART_MODEL=gpt-5.5
 APIMART_IMAGE_BASE_URL=https://api.apimart.ai/v1
 APIMART_IMAGE_MODEL=gpt-image-2
+APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro
 APIMART_IMAGE_SIZE=1:1
 ```
 
@@ -186,7 +187,7 @@ http://8.163.38.177:4000/api/api/projects
 ## 5. Upload And Generation Smoke Test
 
 1. Open a project workspace.
-2. Confirm `GET /api/image-models` returns `apimart-gpt-image-2` and `mock-image-provider`.
+2. Confirm `GET /api/image-models` returns `apimart-gpt-image-2`, `nano-banana-pro`, and `mock-image-provider`.
 3. Upload one png/jpg/jpeg/webp image under 10MB.
 4. Enter a prompt.
 5. Select `GPT-Image-2`.

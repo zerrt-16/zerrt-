@@ -12,9 +12,11 @@ import {
   MessageSquare,
   Send,
   Sparkles,
+  UploadCloud,
   X,
 } from "lucide-react";
 
+import { ModelSelector } from "@/components/model-selector";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { requestApi, resolveAssetUrl } from "@/lib/api";
@@ -82,13 +84,13 @@ function formatShortTime(value: string) {
 function formatTaskLabel(status: GenerationTask["status"]) {
   switch (status) {
     case "pending":
-      return "等待生成";
+      return "等待中";
     case "running":
       return "生成中";
     case "success":
-      return "生成成功";
+      return "成功";
     case "failed":
-      return "生成失败";
+      return "失败";
     default:
       return status;
   }
@@ -106,48 +108,6 @@ function formatTaskTone(status?: GenerationTask["status"]) {
     default:
       return "border-border bg-white text-muted-foreground";
   }
-}
-
-function formatLevelLabel(level: ImageModel["costLevel"] | ImageModel["speedLevel"]) {
-  switch (level) {
-    case "low":
-      return "低";
-    case "medium":
-      return "中";
-    case "high":
-      return "高";
-    default:
-      return level;
-  }
-}
-
-function formatProviderLabel(provider: ImageModel["provider"]) {
-  switch (provider) {
-    case "apimart":
-      return "APIMart";
-    case "mock":
-      return "Mock";
-    default:
-      return provider;
-  }
-}
-
-function getCapabilityLabels(model: ImageModel) {
-  const labels: string[] = [];
-
-  if (model.supportsTextToImage) {
-    labels.push("文生图");
-  }
-
-  if (model.supportsImageToImage) {
-    labels.push("图生图");
-  }
-
-  if (model.supportsMultiImage) {
-    labels.push("多图参考");
-  }
-
-  return labels.length > 0 ? labels : ["暂无能力说明"];
 }
 
 function getRoleLabel(role: Message["role"]) {
@@ -183,6 +143,22 @@ function findLatestMessageAttachment(messages: Message[]) {
   }
 
   return null;
+}
+
+function getModelDisplayName(model: ImageModel | null) {
+  if (!model) {
+    return "未选择模型";
+  }
+
+  if (model.id === "apimart-gpt-image-2") {
+    return "GPT Image 2";
+  }
+
+  return model.name || model.displayName;
+}
+
+function getShortError(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 export function ProjectChat({
@@ -292,9 +268,7 @@ export function ProjectChat({
           return;
         }
 
-        const message =
-          taskError instanceof Error ? taskError.message : "刷新生成状态失败，请稍后重试。";
-        setError(message);
+        setError(getShortError(taskError, "刷新生成状态失败，请稍后重试。"));
         setIsGenerating(false);
       }
     }, 1200);
@@ -313,7 +287,7 @@ export function ProjectChat({
     }
 
     if (!SUPPORTED_FILE_TYPES.has(file.type)) {
-      setError("图片格式不支持，请上传 png、jpg、jpeg 或 webp。");
+      setError("上传失败，请检查图片格式。");
       event.target.value = "";
       return;
     }
@@ -338,8 +312,7 @@ export function ProjectChat({
       });
       setPendingAsset(uploadedAsset);
     } catch (uploadError) {
-      const message = uploadError instanceof Error ? uploadError.message : "上传图片失败，请稍后重试。";
-      setError(message);
+      setError(getShortError(uploadError, "上传失败，请稍后重试。"));
     } finally {
       setIsUploading(false);
       event.target.value = "";
@@ -380,9 +353,7 @@ export function ProjectChat({
       setContent("");
       clearPendingAsset();
     } catch (submitError) {
-      const message =
-        submitError instanceof Error ? submitError.message : "保存备注失败，请稍后重试。";
-      setError(message);
+      setError(getShortError(submitError, "保存备注失败，请稍后重试。"));
     } finally {
       setIsSubmitting(false);
     }
@@ -400,17 +371,17 @@ export function ProjectChat({
     }
 
     if (!pendingAsset && !selectedImageModel.supportsTextToImage) {
-      setError(`模型「${selectedImageModel.displayName}」不支持文生图，请更换模型或上传参考图。`);
+      setError(`模型「${getModelDisplayName(selectedImageModel)}」不支持文生图。`);
       return;
     }
 
     if (pendingAsset && !selectedImageModel.supportsImageToImage) {
-      setError(`模型「${selectedImageModel.displayName}」不支持图生图，请更换支持参考图的模型。`);
+      setError(`模型「${getModelDisplayName(selectedImageModel)}」不支持图生图。`);
       return;
     }
 
     if (!selectedImageModel.allowedSizes.includes(selectedSize)) {
-      setError(`模型「${selectedImageModel.displayName}」不支持当前图片比例。`);
+      setError(`模型「${getModelDisplayName(selectedImageModel)}」不支持当前图片比例。`);
       return;
     }
 
@@ -450,7 +421,7 @@ export function ProjectChat({
           messageText: content,
           sourceAssetId: pendingAsset?.assetId ?? null,
           baseVersionId: null,
-          imageModelId: selectedImageModel.id,
+          modelId: selectedImageModel.id,
           size: selectedSize,
         }),
       });
@@ -459,19 +430,21 @@ export function ProjectChat({
       setContent("");
       clearPendingAsset();
     } catch (generationError) {
-      const message =
-        generationError instanceof Error ? generationError.message : "启动生成任务失败，请稍后重试。";
-      setError(message);
+      setError(getShortError(generationError, "生成失败，请稍后重试。"));
       setIsGenerating(false);
     }
   }
 
   return (
-    <section className="grid min-h-[calc(100vh-104px)] gap-5 lg:grid-cols-[320px_minmax(0,1fr)_380px]">
+    <section className="grid min-h-[calc(100vh-112px)] gap-5 lg:grid-cols-[320px_minmax(0,1fr)_400px]">
       <aside className="space-y-5">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-          <div className="mb-4 text-xs font-medium text-muted-foreground">项目信息</div>
-          <h1 className="text-2xl font-semibold leading-tight">{project.title}</h1>
+        <div className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-sm">
+          <div className="mb-4 text-xs font-medium uppercase tracking-[0.22em] text-muted-foreground">
+            Project
+          </div>
+          <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em]">
+            {project.title}
+          </h1>
           <p className="mt-3 text-sm leading-7 text-muted-foreground">
             {project.description ?? "暂未填写项目说明。"}
           </p>
@@ -487,7 +460,7 @@ export function ProjectChat({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2 font-semibold">
               <History className="h-4 w-4 text-primary" />
@@ -497,7 +470,7 @@ export function ProjectChat({
           </div>
 
           {hasVersions ? (
-            <div className="space-y-3">
+            <div className="max-h-[calc(100vh-390px)] space-y-3 overflow-auto pr-1">
               {versions.map((version, index) => (
                 <div
                   key={version.id}
@@ -510,11 +483,13 @@ export function ProjectChat({
                   />
                   <div className="mt-3 flex items-center justify-between gap-2">
                     <div className="font-medium">版本 {version.versionIndex}</div>
-                    {index === 0 ? (
-                      <span className="rounded-full bg-accent px-2 py-1 text-xs text-accent-foreground">
-                        当前版本
-                      </span>
-                    ) : null}
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
+                      成功
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>{formatShortTime(version.createdAt)}</span>
+                    {index === 0 ? <span>当前版本</span> : null}
                   </div>
                   <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
                     {version.changeSummary ?? "暂无版本说明。"}
@@ -524,36 +499,38 @@ export function ProjectChat({
             </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-border bg-background/70 p-5 text-sm leading-7 text-muted-foreground">
-              暂无版本，点击「生成图片」创建第一版。
+              暂无版本，点击「开始生成」创建第一版。
             </div>
           )}
         </div>
       </aside>
 
       <div className="space-y-5">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm text-muted-foreground">图片预览</div>
-              <h2 className="text-xl font-semibold">当前生成结果</h2>
+              <div className="text-sm text-muted-foreground">Preview</div>
+              <h2 className="text-xl font-semibold tracking-[-0.02em]">当前生成结果</h2>
             </div>
             <div className={`rounded-full border px-3 py-1 text-sm ${statusTone}`}>
               {generationStatus}
             </div>
           </div>
 
-          <div className="relative flex min-h-[520px] items-center justify-center overflow-hidden rounded-2xl border border-border bg-[#f6f5f2]">
+          <div className="relative flex min-h-[540px] items-center justify-center overflow-hidden rounded-3xl border border-border bg-[#f6f5f2] shadow-inner">
             {latestOutputAsset ? (
               <img
                 src={resolveAssetUrl(latestOutputAsset.fileUrl)}
                 alt="当前生成结果"
-                className="max-h-[680px] w-full object-contain"
+                className="max-h-[700px] w-full object-contain"
               />
             ) : (
-              <div className="flex flex-col items-center gap-3 text-center text-muted-foreground">
-                <ImageIcon className="h-12 w-12 text-primary" />
+              <div className="flex max-w-sm flex-col items-center gap-3 text-center text-muted-foreground">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <ImageIcon className="h-7 w-7" />
+                </div>
                 <div className="text-base font-medium text-foreground">暂无生成结果</div>
-                <p className="max-w-sm text-sm leading-6">
+                <p className="text-sm leading-6">
                   上传参考图并输入创作指令，生成结果会显示在这里。
                 </p>
               </div>
@@ -563,21 +540,21 @@ export function ProjectChat({
               <div className="absolute inset-0 flex items-center justify-center bg-white/70 backdrop-blur-sm">
                 <div className="flex items-center gap-3 rounded-full border border-border bg-white px-4 py-3 text-sm shadow-sm">
                   <LoaderCircle className="h-4 w-4 animate-spin text-primary" />
-                  正在生成图片...
+                  生成中...
                 </div>
               </div>
             ) : null}
 
             {currentTask?.status === "failed" ? (
               <div className="absolute bottom-4 left-4 right-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                生成失败：{currentTask.errorMessage ?? "未返回具体错误原因。"}
+                生成失败，请稍后重试。
               </div>
             ) : null}
           </div>
         </div>
 
         <div className="grid gap-5 xl:grid-cols-2">
-          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-sm">
             <div className="mb-3 flex items-center gap-2 font-semibold">
               <ImageIcon className="h-4 w-4 text-primary" />
               当前参考图
@@ -587,28 +564,28 @@ export function ProjectChat({
                 <img
                   src={resolveAssetUrl(latestReferenceAsset.fileUrl)}
                   alt="当前参考图"
-                  className="aspect-[4/3] w-full rounded-xl object-cover"
+                  className="aspect-[4/3] w-full rounded-2xl object-cover"
                 />
                 <div className="mt-2 text-xs text-muted-foreground">
                   素材 ID：{latestReferenceAsset.id}
                 </div>
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-border bg-background/70 p-5 text-sm text-muted-foreground">
+              <div className="rounded-2xl border border-dashed border-border bg-background/70 p-5 text-sm text-muted-foreground">
                 暂无参考图。
               </div>
             )}
           </div>
 
-          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-sm">
             <div className="mb-3 flex items-center gap-2 font-semibold">
               <MessageSquare className="h-4 w-4 text-primary" />
               对话记录
             </div>
             {hasMessages ? (
-              <div className="max-h-[260px] space-y-3 overflow-auto pr-1">
+              <div className="max-h-[280px] space-y-3 overflow-auto pr-1">
                 {messages.map((message) => (
-                  <div key={message.id} className="rounded-xl border border-border bg-background/70 p-3">
+                  <div key={message.id} className="rounded-2xl border border-border bg-background/70 p-3">
                     <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
                       <span>{getRoleLabel(message.role)}</span>
                       <span>{formatShortTime(message.createdAt)}</span>
@@ -617,7 +594,7 @@ export function ProjectChat({
                       <img
                         src={resolveAssetUrl(message.attachmentAsset.fileUrl)}
                         alt="备注附件"
-                        className="mb-3 max-h-36 w-full rounded-lg object-cover"
+                        className="mb-3 max-h-36 w-full rounded-xl object-cover"
                       />
                     ) : null}
                     <div className="whitespace-pre-wrap text-sm leading-6">
@@ -627,7 +604,7 @@ export function ProjectChat({
                 ))}
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-border bg-background/70 p-5 text-sm text-muted-foreground">
+              <div className="rounded-2xl border border-dashed border-border bg-background/70 p-5 text-sm text-muted-foreground">
                 暂无对话记录。
               </div>
             )}
@@ -638,11 +615,11 @@ export function ProjectChat({
       <aside className="space-y-5">
         <form
           onSubmit={handleSubmit}
-          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-sm"
         >
-          <div className="mb-4">
-            <div className="text-sm text-muted-foreground">创作控制区</div>
-            <h2 className="text-xl font-semibold">生成图片</h2>
+          <div className="mb-5">
+            <div className="text-sm text-muted-foreground">Control</div>
+            <h2 className="text-xl font-semibold tracking-[-0.02em]">创作控制区</h2>
           </div>
 
           <input
@@ -653,35 +630,38 @@ export function ProjectChat({
             onChange={handleFileChange}
           />
 
-          <div className="flex flex-wrap gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => inputRef.current?.click()}
-              disabled={isUploading}
-            >
-              <ImagePlus className="h-4 w-4" />
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={isUploading}
+            className="flex w-full flex-col items-center justify-center rounded-3xl border border-dashed border-primary/25 bg-primary/5 px-4 py-6 text-center transition hover:border-primary/40 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <UploadCloud className="h-7 w-7 text-primary" />
+            <span className="mt-3 font-medium">
               {isUploading ? "上传中..." : "上传参考图"}
-            </Button>
-            {pendingAsset ? (
-              <button
-                type="button"
-                onClick={clearPendingAsset}
-                className="inline-flex h-10 items-center gap-2 rounded-xl border border-border bg-white px-3 text-sm text-muted-foreground hover:bg-secondary"
-              >
-                <X className="h-4 w-4" />
-                移除参考图
-              </button>
-            ) : null}
-          </div>
+            </span>
+            <span className="mt-1 text-xs leading-5 text-muted-foreground">
+              支持 png、jpg、jpeg、webp，单张不超过 10MB。
+            </span>
+          </button>
 
           {pendingAsset ? (
-            <div className="mt-4 rounded-xl border border-border bg-background/70 p-3">
-              <div className="mb-2 text-sm font-medium">待使用参考图</div>
+            <div className="mt-4 rounded-2xl border border-border bg-background/70 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-sm font-medium">待使用参考图</div>
+                <button
+                  type="button"
+                  onClick={clearPendingAsset}
+                  className="inline-flex h-8 items-center gap-1 rounded-full border border-border bg-white px-3 text-xs text-muted-foreground hover:bg-secondary"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  移除
+                </button>
+              </div>
               <img
                 src={resolveAssetUrl(pendingAsset.fileUrl)}
                 alt="待使用参考图"
-                className="max-h-52 w-full rounded-lg object-cover"
+                className="max-h-52 w-full rounded-xl object-cover"
               />
               <div className="mt-2 text-xs text-muted-foreground">
                 素材 ID：{pendingAsset.assetId}
@@ -689,86 +669,21 @@ export function ProjectChat({
             </div>
           ) : null}
 
-          <div className="mt-5 space-y-3">
-            <div className="grid gap-3">
-              <label htmlFor="image-model" className="text-sm font-medium">
-                生图模型
-              </label>
-              <select
-                id="image-model"
-                value={selectedImageModel?.id ?? ""}
-                onChange={(event) => {
-                  const nextModel = imageModels.find((model) => model.id === event.target.value);
-                  setSelectedImageModelId(event.target.value);
-
-                  if (nextModel) {
-                    setSelectedSize(nextModel.defaultSize);
-                  }
-                }}
-                className="h-11 rounded-xl border border-input bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
-              >
-                {compatibleImageModels.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.displayName}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid gap-3">
-              <label htmlFor="image-size" className="text-sm font-medium">
-                图片比例
-              </label>
-              <select
-                id="image-size"
-                value={selectedSize}
-                onChange={(event) => setSelectedSize(event.target.value)}
-                disabled={!selectedImageModel}
-                className="h-11 rounded-xl border border-input bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {(selectedImageModel?.allowedSizes ?? ["1:1"]).map((size) => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {selectedImageModel ? (
-              <div className="rounded-xl border border-border bg-background/70 p-3 text-sm leading-6 text-muted-foreground">
-                <div className="font-medium text-foreground">
-                  {selectedImageModel.displayName}
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {formatProviderLabel(selectedImageModel.provider)} /{" "}
-                    {selectedImageModel.providerModel}
-                  </span>
-                </div>
-                <p className="mt-1">{selectedImageModel.description}</p>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  {getCapabilityLabels(selectedImageModel).map((label) => (
-                    <span
-                      key={label}
-                      className="rounded-full border border-border bg-white px-2 py-1 text-foreground"
-                    >
-                      {label}
-                    </span>
-                  ))}
-                  <span className="rounded-full border border-border bg-white px-2 py-1 text-foreground">
-                    成本：{formatLevelLabel(selectedImageModel.costLevel)}
-                  </span>
-                  <span className="rounded-full border border-border bg-white px-2 py-1 text-foreground">
-                    速度：{formatLevelLabel(selectedImageModel.speedLevel)}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                暂无可用的生图模型。
-              </div>
-            )}
+          <div className="mt-5">
+            <ModelSelector
+              models={imageModels}
+              selectedModelId={selectedImageModel?.id ?? ""}
+              selectedSize={selectedSize}
+              isImageToImage={isImageToImage}
+              onSelectModel={(model) => {
+                setSelectedImageModelId(model.id);
+                setSelectedSize(model.defaultSize);
+              }}
+              onSelectSize={setSelectedSize}
+            />
           </div>
 
-          <div className="mt-4 space-y-2">
+          <div className="mt-5 space-y-2">
             <label htmlFor="creation-instruction" className="text-sm font-medium">
               创作指令
             </label>
@@ -776,14 +691,14 @@ export function ProjectChat({
               id="creation-instruction"
               value={content}
               onChange={(event) => setContent(event.target.value)}
-              placeholder="描述画面主体、风格、构图、需要保留或调整的元素。"
+              placeholder="描述画面目标、风格方向、产品细节或参考要求。"
               maxLength={4000}
-              className="min-h-[160px]"
+              className="min-h-[180px]"
             />
           </div>
 
           {error ? (
-            <div className="mt-4 flex gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
+            <div className="mt-4 flex gap-2 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               {error}
             </div>
@@ -805,7 +720,7 @@ export function ProjectChat({
               ) : (
                 <>
                   <Sparkles className="h-4 w-4" />
-                  生成图片
+                  开始生成
                 </>
               )}
             </Button>
@@ -821,7 +736,7 @@ export function ProjectChat({
           </div>
         </form>
 
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 font-semibold">
               <Clock3 className="h-4 w-4 text-primary" />
@@ -834,17 +749,17 @@ export function ProjectChat({
 
           {currentTask ? (
             <div className="space-y-3 text-sm text-muted-foreground">
-              <div className="rounded-xl bg-background/70 p-3">
+              <div className="rounded-2xl bg-background/70 p-3">
                 <div>任务 ID：{currentTask.id}</div>
                 <div>任务类型：{currentTask.taskType}</div>
                 <div>模型：{currentTask.modelName}</div>
               </div>
-              {currentTask.errorMessage ? (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">
-                  失败原因：{currentTask.errorMessage}
+              {currentTask.status === "failed" ? (
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-red-700">
+                  失败原因：生成失败，请稍后重试。
                 </div>
               ) : null}
-              <details className="rounded-xl border border-border bg-background/70 p-3">
+              <details className="rounded-2xl border border-border bg-background/70 p-3">
                 <summary className="cursor-pointer font-medium text-foreground">查看 Prompt</summary>
                 <div className="mt-3 space-y-3 text-xs leading-6">
                   <div>
@@ -859,19 +774,19 @@ export function ProjectChat({
               </details>
             </div>
           ) : (
-            <div className="rounded-xl border border-dashed border-border bg-background/70 p-4 text-sm text-muted-foreground">
+            <div className="rounded-2xl border border-dashed border-border bg-background/70 p-4 text-sm text-muted-foreground">
               还没有生成任务。
             </div>
           )}
         </div>
 
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-sm">
           <div className="mb-3 flex items-center gap-2 font-semibold">
             <FileText className="h-4 w-4 text-primary" />
             备注说明
           </div>
           <p className="text-sm leading-7 text-muted-foreground">
-            「生成图片」会创建生成任务和版本记录；「仅保存备注」只写入对话记录，不会触发生成。
+            「开始生成」会创建生成任务和版本记录；「仅保存备注」只写入对话记录，不会触发生成。
           </p>
         </div>
       </aside>
