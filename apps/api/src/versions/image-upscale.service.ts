@@ -42,6 +42,8 @@ type ApimartChatCompletionResponse = {
   }>;
 };
 
+type SourceAspectRatio = "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
+
 const upscaleTaskSelect = {
   id: true,
   projectId: true,
@@ -139,11 +141,19 @@ export class ImageUpscaleService {
       throw new NotFoundException("未找到可放大的原图。");
     }
 
+    const sourceAspectRatio = this.getAssetAspectRatio(
+      sourceVersion.outputAsset.width,
+      sourceVersion.outputAsset.height,
+    );
+    const requestedProviderSize = this.getUpscaleProviderSize(
+      input.dto.targetResolution,
+      sourceAspectRatio,
+    );
     const requestedModelId = input.dto.modelId ?? "nano-banana-pro";
     const imageModelSelection = this.imageModelRegistryService.resolveForRequest({
       imageModelId: requestedModelId,
       taskType: GenerationTaskType.image_to_image,
-      size: this.getAssetAspectRatio(sourceVersion.outputAsset.width, sourceVersion.outputAsset.height),
+      size: sourceAspectRatio,
     });
     const sourceImageUrl = input.dto.sourceImageUrl ?? sourceVersion.outputAsset.fileUrl;
     const originalPrompt =
@@ -160,6 +170,8 @@ export class ImageUpscaleService {
       originalPrompt,
       modelId: imageModelSelection.model.id,
       providerModel: imageModelSelection.model.providerModel,
+      sourceAspectRatio,
+      providerSize: requestedProviderSize,
       status: "pending",
     };
 
@@ -168,6 +180,8 @@ export class ImageUpscaleService {
       versionId: input.versionId,
       sourceImageUrlExists: Boolean(sourceImageUrl),
       targetResolution: input.dto.targetResolution,
+      sourceAspectRatio,
+      providerSize: requestedProviderSize,
       promptLength: originalPrompt.length,
     });
 
@@ -191,6 +205,8 @@ export class ImageUpscaleService {
       targetResolution: input.dto.targetResolution,
       modelId: imageModelSelection.model.id,
       providerModel: imageModelSelection.model.providerModel,
+      providerSize: requestedProviderSize,
+      sourceAspectRatio,
     });
 
     return task;
@@ -202,6 +218,8 @@ export class ImageUpscaleService {
       targetResolution: UpscaleTargetResolution;
       modelId: string;
       providerModel: string;
+      providerSize: string;
+      sourceAspectRatio: SourceAspectRatio;
     },
   ) {
     const task = await this.prisma.generationTask.findUnique({
@@ -265,10 +283,18 @@ export class ImageUpscaleService {
       originalPrompt: task.promptText,
       targetResolution: input.targetResolution,
     });
+    const sourceAspectRatio = this.getAssetAspectRatio(
+      task.sourceAsset.width,
+      task.sourceAsset.height,
+    );
+    const providerSize =
+      input.sourceAspectRatio === sourceAspectRatio
+        ? input.providerSize
+        : this.getUpscaleProviderSize(input.targetResolution, sourceAspectRatio);
     const imageModelSelection = this.imageModelRegistryService.resolveForRequest({
       imageModelId: input.modelId,
       taskType: GenerationTaskType.image_to_image,
-      size: this.getAssetAspectRatio(task.sourceAsset.width, task.sourceAsset.height),
+      size: sourceAspectRatio,
     });
     const providerName = this.imageProvider.getProviderName(imageModelSelection.model);
 
@@ -276,6 +302,8 @@ export class ImageUpscaleService {
       modelId: imageModelSelection.model.id,
       providerModel: imageModelSelection.model.providerModel,
       targetResolution: input.targetResolution,
+      sourceAspectRatio,
+      providerSize,
       finalPromptLength: finalPrompt.length,
       status: "running",
     });
@@ -297,6 +325,8 @@ export class ImageUpscaleService {
             finalPrompt,
             modelId: imageModelSelection.model.id,
             providerModel: imageModelSelection.model.providerModel,
+            sourceAspectRatio,
+            providerSize,
             status: "running",
             mockMode: imageModelSelection.model.provider === "mock",
           },
@@ -308,7 +338,7 @@ export class ImageUpscaleService {
         prompt: finalPrompt,
         negativePrompt: this.getUpscaleNegativePrompt(),
         imageModel: imageModelSelection.model,
-        size: imageModelSelection.size,
+        size: providerSize,
         sourceFilePath,
         sourceMimeType: task.sourceAsset.mimeType,
         sourceWidth: task.sourceAsset.width,
@@ -336,10 +366,17 @@ export class ImageUpscaleService {
         select: { versionIndex: true },
       });
       const versionIndex = (latestVersion?.versionIndex ?? 0) + 1;
+      const targetReached = this.didReachTargetResolution({
+        targetResolution: input.targetResolution,
+        width: providerResult.width,
+        height: providerResult.height,
+      });
       const changeSummary =
         imageModelSelection.model.provider === "mock"
           ? `${input.targetResolution} 测试模式高清重绘，未调用真实高清重绘模型。`
-          : `${input.targetResolution} AI 高清重绘，基于来源版本增强细节与清晰度。`;
+          : targetReached
+            ? `${this.getTargetResolutionLabel(input.targetResolution)}，实际输出 ${providerResult.width}×${providerResult.height}。`
+            : `${this.getTargetResolutionLabel(input.targetResolution)}，模型实际返回 ${providerResult.width}×${providerResult.height}，未达到物理 ${input.targetResolution} 像素。`;
 
       await this.prisma.$transaction([
         this.prisma.generationTask.update({
@@ -358,6 +395,11 @@ export class ImageUpscaleService {
               finalPrompt,
               modelId: imageModelSelection.model.id,
               providerModel: imageModelSelection.model.providerModel,
+              sourceAspectRatio,
+              providerSize,
+              actualWidth: providerResult.width,
+              actualHeight: providerResult.height,
+              targetReached,
               outputAssetId: outputAsset.id,
               status: "success",
               mockMode: imageModelSelection.model.provider === "mock",
@@ -388,6 +430,10 @@ export class ImageUpscaleService {
         modelId: imageModelSelection.model.id,
         providerModel: imageModelSelection.model.providerModel,
         targetResolution: input.targetResolution,
+        providerSize,
+        actualWidth: providerResult.width,
+        actualHeight: providerResult.height,
+        targetReached,
         status: "success",
       });
     } catch (error) {
@@ -617,7 +663,7 @@ export class ImageUpscaleService {
     });
   }
 
-  private getAssetAspectRatio(width: number, height: number) {
+  private getAssetAspectRatio(width: number, height: number): SourceAspectRatio {
     const ratio = width / height;
 
     if (Math.abs(ratio - 1) < 0.08) {
@@ -629,6 +675,58 @@ export class ImageUpscaleService {
     }
 
     return Math.abs(ratio - 9 / 16) < Math.abs(ratio - 3 / 4) ? "9:16" : "3:4";
+  }
+
+  private getUpscaleProviderSize(
+    targetResolution: UpscaleTargetResolution,
+    aspectRatio: SourceAspectRatio,
+  ) {
+    const aspectEnvKey = `APIMART_UPSCALE_${targetResolution}_SIZE_${aspectRatio.replace(":", "_")}`;
+    const globalEnvKey = `APIMART_UPSCALE_${targetResolution}_SIZE`;
+    const envSize =
+      this.configService.get<string>(aspectEnvKey)?.trim() ||
+      this.configService.get<string>(globalEnvKey)?.trim();
+
+    if (envSize) {
+      return envSize;
+    }
+
+    const defaultSizes: Record<
+      UpscaleTargetResolution,
+      Record<SourceAspectRatio, string>
+    > = {
+      "2K": {
+        "1:1": "2048x2048",
+        "4:3": "2048x1536",
+        "3:4": "1536x2048",
+        "16:9": "2560x1440",
+        "9:16": "1440x2560",
+      },
+      "4K": {
+        "1:1": "4096x4096",
+        "4:3": "4096x3072",
+        "3:4": "3072x4096",
+        "16:9": "3840x2160",
+        "9:16": "2160x3840",
+      },
+    };
+
+    return defaultSizes[targetResolution][aspectRatio];
+  }
+
+  private getTargetResolutionLabel(targetResolution: UpscaleTargetResolution) {
+    return targetResolution === "4K" ? "4K 细节重绘" : "2K 高清重绘";
+  }
+
+  private didReachTargetResolution(input: {
+    targetResolution: UpscaleTargetResolution;
+    width: number;
+    height: number;
+  }) {
+    const longestEdge = Math.max(input.width, input.height);
+    const requiredLongestEdge = input.targetResolution === "4K" ? 3840 : 2048;
+
+    return longestEdge >= requiredLongestEdge;
   }
 
   private getAnalysisModelName() {

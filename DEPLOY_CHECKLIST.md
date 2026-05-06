@@ -24,6 +24,8 @@ APIMART_NANO_BANANA_PRO_MODEL=gemini-3-pro-image-preview
 APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro,mock-image-provider
 APIMART_IMAGE_SIZE=1:1
 APIMART_IMAGE_TIMEOUT_SECONDS=300
+APIMART_UPSCALE_2K_SIZE=
+APIMART_UPSCALE_4K_SIZE=
 ```
 
 ## 2. Rebuild
@@ -157,6 +159,7 @@ Expected log fields:
 ```text
 modelId: nano-banana-pro
 providerModel: gemini-3-pro-image-preview
+providerSize: 4096x4096
 ```
 
 ## 5. Stale Public API Checks
@@ -212,10 +215,11 @@ http://8.163.38.177:4000/api/api/projects
 
 9. Click a generated image or `预览大图`; confirm the preview dialog opens.
 10. Click `下载原图`; confirm the file downloads as `zerrt-ai-{projectId}-{versionId}.png` or the matching source extension.
-11. Click `2K 高清重绘` or `4K 细节增强`; confirm a new task is created and the UI shows loading.
+11. Click `2K 高清重绘` or `4K 细节重绘`; confirm a new task is created and the UI shows loading.
 12. After success, confirm the new upscale version appears in the version list and can be previewed/downloaded.
-13. If the provider is unavailable, the UI should show `图片分析失败，请稍后重试。` or `高清放大失败，请稍后重试。`.
-14. If a request fails, the UI should only show a short Chinese message such as:
+13. In the preview dialog, confirm the actual pixel size is shown. If the model returns 1024/1254 instead of physical 4K, the UI should label it as `4K 细节重绘` and clearly show the actual size.
+14. If the provider is unavailable, the UI should show `图片分析失败，请稍后重试。` or `高清放大失败，请稍后重试。`.
+15. If a request fails, the UI should only show a short Chinese message such as:
 
 ```text
 请求失败，状态码 404。

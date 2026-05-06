@@ -263,6 +263,8 @@ APIMART_NANO_BANANA_PRO_MODEL=gemini-3-pro-image-preview
 APIMART_IMAGE_MODELS=gpt-image-2,nano-banana-pro,mock-image-provider
 APIMART_IMAGE_SIZE=1:1
 APIMART_IMAGE_TIMEOUT_SECONDS=300
+APIMART_UPSCALE_2K_SIZE=
+APIMART_UPSCALE_4K_SIZE=
 ```
 
 2. Start the backend and frontend.
@@ -558,9 +560,12 @@ The 2K / 4K flow is not a traditional super-resolution algorithm. It creates a n
 
 1. GPT-5.5 analyzes the source image and extracts the subject, pose, scene, composition, lighting, materials, background, style keywords, locked details, and forbidden changes.
 2. Nano Banana Pro receives the analysis, original prompt, target resolution, and source image to redraw a higher-definition version while preserving composition and identity.
-3. The result is saved as a new output `Asset` and a new `ImageVersion` with `parentVersionId` pointing to the source version.
+3. The upscale service maps `targetResolution` to a real provider `size` value before calling APIMart. Defaults are aspect-aware, for example `2K + 1:1 -> 2048x2048`, `4K + 1:1 -> 4096x4096`, and `4K + 16:9 -> 3840x2160`.
+4. The result is saved as a new output `Asset` and a new `ImageVersion` with `parentVersionId` pointing to the source version.
 
-No Prisma migration is required for this MVP. Upscale metadata such as `generationType`, `targetResolution`, `analysisPrompt`, `finalPrompt`, `modelId`, and `providerModel` is stored in `GenerationTask.structuredPayloadJson`.
+No Prisma migration is required for this MVP. Upscale metadata such as `generationType`, `targetResolution`, `providerSize`, `actualWidth`, `actualHeight`, `targetReached`, `analysisPrompt`, `finalPrompt`, `modelId`, and `providerModel` is stored in `GenerationTask.structuredPayloadJson`.
+
+If APIMart returns a smaller image than requested, the UI labels the result as `4K 细节重绘` or `2K 高清重绘` and shows the actual pixel size instead of implying it reached physical 4K/2K pixels.
 
 API checks:
 

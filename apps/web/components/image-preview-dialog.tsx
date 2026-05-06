@@ -65,6 +65,21 @@ function getPayloadText(version: Version, key: string) {
   return typeof value === "string" ? value : null;
 }
 
+function getUpscaleTargetLabel(targetResolution: string) {
+  return targetResolution === "4K" ? "4K 细节重绘" : "2K 高清重绘";
+}
+
+function didReachTargetPixels(version: Version, targetResolution: string | null) {
+  if (targetResolution !== "2K" && targetResolution !== "4K") {
+    return null;
+  }
+
+  const longestEdge = Math.max(version.outputAsset.width, version.outputAsset.height);
+  const requiredLongestEdge = targetResolution === "4K" ? 3840 : 2048;
+
+  return longestEdge >= requiredLongestEdge;
+}
+
 export function ImagePreviewDialog({
   isUpscaling,
   projectId,
@@ -76,7 +91,9 @@ export function ImagePreviewDialog({
   const imageUrl = resolveAssetUrl(version.outputAsset.fileUrl);
   const prompt = version.generationTask?.promptText ?? version.changeSummary ?? "暂无 Prompt。";
   const targetResolution = getPayloadText(version, "targetResolution");
+  const providerSize = getPayloadText(version, "providerSize");
   const isUpscaleVersion = getPayloadText(version, "generationType") === "upscale";
+  const targetReached = didReachTargetPixels(version, targetResolution);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
@@ -142,13 +159,33 @@ export function ImagePreviewDialog({
             </div>
             {isUpscaleVersion && targetResolution ? (
               <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">高清重绘</span>
+                <span className="text-muted-foreground">重绘目标</span>
                 <span className="rounded-full border border-primary/20 bg-primary/5 px-2 py-1 text-xs text-primary">
-                  {targetResolution}
+                  {getUpscaleTargetLabel(targetResolution)}
                 </span>
               </div>
             ) : null}
+            {isUpscaleVersion && providerSize ? (
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">请求尺寸</span>
+                <span className="text-right">{providerSize}</span>
+              </div>
+            ) : null}
           </div>
+
+          {isUpscaleVersion && targetResolution && targetReached === false ? (
+            <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+              当前图片实际为 {version.outputAsset.width} × {version.outputAsset.height}，未达到物理{" "}
+              {targetResolution} 像素；这是按「{getUpscaleTargetLabel(targetResolution)}」目标生成的细节重绘版。
+            </div>
+          ) : null}
+
+          {isUpscaleVersion && targetResolution && targetReached === true ? (
+            <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-800">
+              当前图片实际为 {version.outputAsset.width} × {version.outputAsset.height}，已达到{" "}
+              {targetResolution} 目标像素区间。
+            </div>
+          ) : null}
 
           <div className="mt-4 rounded-2xl border border-border bg-white p-4">
             <div className="mb-2 flex items-center gap-2 font-medium">
@@ -182,9 +219,9 @@ export function ImagePreviewDialog({
           <div className="mt-4 rounded-2xl border border-primary/15 bg-primary/5 p-3 text-xs leading-5 text-primary">
             <div className="mb-1 flex items-center gap-1.5 font-medium">
               <Sparkles className="h-3.5 w-3.5" />
-              基于 Nano Banana Pro 重新生成高清版本
+              基于 Nano Banana Pro 重新生成高清细节版本
             </div>
-            高清放大会基于原图进行 AI 重绘，尽量保持构图和细节一致，但可能与原图存在轻微差异。
+            高清重绘会基于原图进行 AI 重绘，尽量保持构图和细节一致。最终像素尺寸取决于模型实际返回结果，可能与目标 2K / 4K 存在差异。
           </div>
 
           <Button type="button" variant="secondary" className="mt-4" onClick={onClose}>

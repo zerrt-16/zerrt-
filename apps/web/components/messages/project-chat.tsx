@@ -231,7 +231,7 @@ function getVersionResolutionBadge(version: Version) {
   const targetResolution = payload?.targetResolution;
 
   if (generationType === "upscale" && typeof targetResolution === "string") {
-    return `${targetResolution} 高清重绘`;
+    return getUpscaleTargetLabel(targetResolution);
   }
 
   return null;
@@ -239,6 +239,28 @@ function getVersionResolutionBadge(version: Version) {
 
 function getOriginalPrompt(version: Version, fallbackPrompt?: string) {
   return version.generationTask?.promptText ?? fallbackPrompt ?? version.changeSummary ?? "";
+}
+
+function getUpscaleTargetLabel(targetResolution: string) {
+  return targetResolution === "4K" ? "4K 细节重绘" : "2K 高清重绘";
+}
+
+function getVersionActualSize(version: Version) {
+  return `${version.outputAsset.width} × ${version.outputAsset.height}`;
+}
+
+function didReachTargetPixels(version: Version) {
+  const payload = version.generationTask?.structuredPayloadJson;
+  const targetResolution = payload?.targetResolution;
+
+  if (targetResolution !== "2K" && targetResolution !== "4K") {
+    return null;
+  }
+
+  const longestEdge = Math.max(version.outputAsset.width, version.outputAsset.height);
+  const requiredLongestEdge = targetResolution === "4K" ? 3840 : 2048;
+
+  return longestEdge >= requiredLongestEdge;
 }
 
 export function ProjectChat({
@@ -737,6 +759,11 @@ export function ProjectChat({
                           {getVersionResolutionBadge(version)}
                         </div>
                       ) : null}
+                      {didReachTargetPixels(version) === false ? (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          实际 {getVersionActualSize(version)}
+                        </div>
+                      ) : null}
                     </div>
                     <span
                       className={`rounded-full border px-2 py-1 text-xs ${formatTaskTone(
@@ -786,7 +813,7 @@ export function ProjectChat({
                       onClick={() => handleUpscaleVersion(version, "4K")}
                       className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-primary/20 bg-primary/5 text-xs text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      4K 细节增强
+                      4K 细节重绘
                     </button>
                   </div>
                 </div>
@@ -909,7 +936,7 @@ export function ProjectChat({
                 disabled={isGenerating}
                 onClick={() => handleUpscaleVersion(currentPreviewVersion, "4K")}
               >
-                4K 细节增强
+                4K 细节重绘
               </Button>
             </div>
           ) : null}

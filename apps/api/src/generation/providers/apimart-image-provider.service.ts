@@ -115,7 +115,7 @@ export class ApimartImageProviderService extends ImageProvider {
       projectId: input.projectId,
       hasPrompt: Boolean(input.prompt.trim()),
       referenceImageCount: input.referenceImageDataUrl ? 1 : 0,
-      aspectRatio: requestedImageSize,
+      requestedSize: requestedImageSize,
     };
 
     console.log("[image-generation-request]", requestContext);
